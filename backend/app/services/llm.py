@@ -1,5 +1,6 @@
 import json
 import os
+import requests
 from google import genai
 from typing import Dict, List, Optional
 import logging
@@ -9,170 +10,143 @@ from .nlp import extract_keywords
 logger = logging.getLogger(__name__)
 
 
-def get_genai_client():
-    """Инициализация клиента Google GenAI"""
+def get_llm_client():
+    """
+    Универсальный клиент для LLM (Google / Timeweb / OpenAI / Custom).
+    Возвращает объект с методом `.generate(prompt: str, model: str) -> str`.
+    """
     settings = get_settings()
-    # Проверяем оба варианта имени переменной
-    api_key = settings.google_genai_api_key or settings.gemini_api_key
-    if not api_key or api_key == "":
-        logger.warning("GOOGLE_GENAI_API_KEY or GEMINI_API_KEY is not set")
-        return None
-    try:
-        # Устанавливаем переменную окружения для нового API
+
+    # Настройки: поддержка кастомных эндпоинтов
+    endpoint = getattr(settings, "custom_llm_endpoint", None)
+    api_key = getattr(settings, "custom_llm_api_key", None)
+    provider = getattr(settings, "llm_provider", "google")  # google | timeweb | openai | custom
+    logger.info(f"=============== Используется {api_key}")
+    logger.info(f"=============== Используется {endpoint}")
+
+    if provider == "google":
+        api_key = settings.google_genai_api_key or settings.gemini_api_key
+        if not api_key:
+            logger.warning("GOOGLE_GENAI_API_KEY or GEMINI_API_KEY not set")
+            return None
         os.environ['GEMINI_API_KEY'] = api_key
-        # Создаем клиент - он автоматически использует GEMINI_API_KEY из окружения
         client = genai.Client(api_key=api_key)
-        logger.info(f"GenAI client initialized successfully with API key: {api_key[:10]}...")
-        return client
-    except Exception as e:
-        logger.error(f"Failed to initialize GenAI client: {e}")
-        logger.exception(e)
+        return GoogleLLMWrapper(client)
+
+    elif provider in {"timeweb", "custom"} and endpoint and api_key:
+        return HTTPBasedLLMWrapper(endpoint, api_key)
+
+    else:
+        logger.warning("No valid LLM configuration found")
         return None
+
+
+class GoogleLLMWrapper:
+    def __init__(self, client):
+        self.client = client
+
+    def generate(self, prompt: str, model: str = "gemini-2.5-flash") -> str:
+        response = self.client.models.generate_content(model=model, contents=prompt)
+        return response.text.strip()
+
+
+class HTTPBasedLLMWrapper:
+    """
+    Универсальный HTTP LLM клиент для кастомных API вроде Timeweb Grok.
+    Пример API: POST https://agent.timeweb.cloud/api/v1/cloud-ai/agents/<id>/v1
+    """
+    def __init__(self, endpoint: str, api_key: str):
+        self.endpoint = endpoint.rstrip("/")
+        self.api_key = api_key
+
+    def generate(self, prompt: str, model: str = "grok-code-fast-1") -> str:
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3
+        }
+
+        response = requests.post(self.endpoint, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        data = response.json()
+
+        # Унификация ответа
+        text = (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            or data.get("output", "")
+            or data.get("response", "")
+        )
+
+        return text.strip()
 
 
 def analyze_note_with_llm(content: str) -> Optional[Dict]:
-    """
-    Анализирует заметку с помощью LLM и извлекает:
-    - Ключевые понятия/темы
-    - Теги
-    - Пробелы в знаниях
-    
-    Если LLM недоступен, использует простой NLP анализ
-    
-    Возвращает Dict с полями:
-    - keywords: список ключевых слов
-    - tags: список тегов
-    - summary: резюме
-    - knowledge_gaps: пробелы в знаниях
-    - model_used: какая модель использовалась
-    - reasoning: рассуждения модели (если доступны)
-    """
     if not content or len(content.strip()) < 10:
         return None
 
-    # Пробуем использовать LLM
     try:
-        client = get_genai_client()
+        client = get_llm_client()
         if client:
-            prompt = f"""Ты - эксперт по анализу текстов и построению графов знаний. Проанализируй следующую заметку и создай иерархическую структуру знаний.
-
-ВАЖНО:
-- Извлекай ТОЛЬКО существительные и ключевые термины, которые представляют реальные концепции, предметы, вещества, процессы
-- НЕ включай служебные слова (для, в, на, но, что, это, и т.д.)
-- НЕ включай общие слова (проблема, использование, большинство, нужен и т.д.)
-- Фокусируйся на конкретных сущностях: вещества, методы, объекты, процессы
-
+            prompt = f"""Ты — эксперт по анализу текстов и построению графов знаний. Проанализируй заметку и верни JSON.
 Заметка:
 {content}
 
-Верни ответ в формате JSON со следующими полями:
-- "main_topic": главная тема заметки (одна фраза, например "анестезия лабораторных мышей")
-- "main_concepts": список основных концепций первого уровня (3-5 ключевых понятий, которые напрямую связаны с главной темой)
-- "concept_hierarchy": объект, где ключ - это концепция из main_concepts, а значение - список связанных концепций второго уровня (например, {{"кетамин": ["NMDA-антагонист", "бронхоспазм", "диссоциативное вещество"]}})
-- "concept_descriptions": объект с описаниями каждой концепции ({{"кетамин": "NMDA-антагонист, применяемый для наркоза в медицине и ветеринарии", ...}})
-- "tags": список тегов для категоризации (ОБЯЗАТЕЛЬНО минимум 3-5 тегов, например: ["медицина", "ветеринария", "фармакология", "лабораторные животные"])
-- "summary": краткое резюме (1-2 предложения)
-- "knowledge_gaps": список тем, которые упоминаются, но недостаточно раскрыты (если есть)
-- "reasoning": краткое объяснение твоего анализа (1-2 предложения)
-
-Пример для заметки о кетамине:
+Формат ответа:
 {{
-  "main_topic": "анестезия лабораторных мышей",
-  "main_concepts": ["кетамин", "ксилазин", "анестезия"],
-  "concept_hierarchy": {{
-    "кетамин": ["NMDA-антагонист", "бронхоспазм", "диссоциативное вещество"],
-    "анестезия": ["наркоз", "обезболивание"]
-  }},
-  "concept_descriptions": {{
-    "кетамин": "NMDA-антагонист, применяемый для наркоза в медицине и ветеринарии",
-    "анестезия": "метод обезболивания при медицинских процедурах"
-  }},
-  "tags": ["медицина", "ветеринария", "фармакология", "лабораторные животные"]
-}}
+  "main_topic": "",
+  "main_concepts": [],
+  "concept_hierarchy": {{}},
+  "concept_descriptions": {{}},
+  "tags": [],
+  "summary": "",
+  "knowledge_gaps": [],
+  "reasoning": ""
+}}"""
 
-Ответ должен быть только валидным JSON, без дополнительного текста."""
+            text = client.generate(prompt, model="grok-code-fast-1")
 
-            # Используем новый API
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-            text = response.text.strip()
-
-            # Убираем markdown code blocks если есть
-            if text.startswith("```json"):
-                text = text[7:]
-            if text.startswith("```"):
-                text = text[3:]
+            # Убираем ```json и т.д.
+            for prefix in ("```json", "```"):
+                if text.startswith(prefix):
+                    text = text[len(prefix):]
             if text.endswith("```"):
                 text = text[:-3]
             text = text.strip()
 
             result = json.loads(text)
-            result["model_used"] = "gemini-2.5-flash"
-            logger.info("LLM analysis successful")
+            result["model_used"] = getattr(client, "__class__", type(client)).__name__
+            logger.info("LLM analysis successful via custom endpoint")
             return result
+
     except Exception as e:
-        logger.warning(f"LLM analysis failed: {e}, falling back to NLP")
-        logger.exception(e)  # Логируем полный traceback для отладки
+        logger.warning(f"LLM analysis failed: {e}, fallback to NLP")
+        logger.exception(e)
 
-    # Fallback на простой NLP анализ
-    try:
-        keywords = extract_keywords(content, max_keywords=10)
-        # Фильтруем служебные слова
-        stop_words = {'для', 'в', 'на', 'но', 'что', 'это', 'и', 'проблема', 'использование', 'большинство', 'нужен', 'нужно', 'нужны', 'использования', 'проведения'}
-        keywords = [k for k in keywords if k.lower() not in stop_words and len(k) > 3]
-        
-        # Простая категоризация на основе ключевых слов
-        tags = []
-        content_lower = content.lower()
-        if any(k in content_lower for k in ['анестезия', 'кетамин', 'ксилазин', 'лекарство', 'препарат', 'медицин']):
-            tags.append('медицина')
-        if any(k in content_lower for k in ['мышь', 'мыши', 'животное', 'лаборатория', 'лабораторн']):
-            tags.append('лабораторные_животные')
-        if any(k in content_lower for k in ['химия', 'вещество', 'соединение', 'химическ']):
-            tags.append('химия')
-        if any(k in content_lower for k in ['биология', 'биологическ']):
-            tags.append('биология')
-        if any(k in content_lower for k in ['регулирование', 'регулируются', 'страны', 'закон']):
-            tags.append('регулирование')
-        
-        summary = content[:100] + "..." if len(content) > 100 else content
-        
-        # Создаем простую иерархию для fallback
-        main_topic = summary[:50] if summary else "Заметка"
-        main_concepts = keywords[:5] if keywords else []
-        concept_hierarchy = {}
-        concept_descriptions = {k: f"Концепция: {k}" for k in keywords}
-        
-        return {
-            "main_topic": main_topic,
-            "main_concepts": main_concepts,
-            "concept_hierarchy": concept_hierarchy,
-            "concept_descriptions": concept_descriptions,
-            "keywords": keywords,
-            "tags": tags if tags else ["общее"],
-            "summary": summary,
-            "knowledge_gaps": [],
-            "model_used": "nlp-fallback",
-            "reasoning": "Использован простой NLP анализ (LLM недоступен)"
-        }
-    except Exception as e:
-        logger.error(f"Fallback NLP analysis failed: {e}")
-        return None
+    # fallback
+    return _fallback_nlp_analysis(content)
 
 
-def extract_keywords_with_llm(content: str) -> List[str]:
-    """Извлекает ключевые слова из заметки с помощью LLM"""
-    analysis = analyze_note_with_llm(content)
-    if analysis and "keywords" in analysis:
-        return analysis["keywords"]
-    return []
-
-
-def detect_knowledge_gaps(content: str) -> List[str]:
-    """Определяет пробелы в знаниях на основе анализа заметки"""
-    analysis = analyze_note_with_llm(content)
-    if analysis and "knowledge_gaps" in analysis:
-        return analysis["knowledge_gaps"]
-    return []
+def _fallback_nlp_analysis(content: str) -> Dict:
+    keywords = extract_keywords(content, max_keywords=10)
+    stop_words = {'для', 'в', 'на', 'но', 'что', 'это', 'и', 'проблема', 'использование', 'большинство', 'нужен', 'нужно', 'нужны', 'использования', 'проведения'}
+    keywords = [k for k in keywords if k.lower() not in stop_words and len(k) > 3]
+    summary = content[:100] + "..." if len(content) > 100 else content
+    return {
+        "main_topic": summary[:50],
+        "main_concepts": keywords[:5],
+        "concept_hierarchy": {},
+        "concept_descriptions": {k: f"Концепция: {k}" for k in keywords},
+        "keywords": keywords,
+        "tags": ["общее"],
+        "summary": summary,
+        "knowledge_gaps": [],
+        "model_used": "nlp-fallback",
+        "reasoning": "LLM недоступен, использован простой NLP анализ"
+    }

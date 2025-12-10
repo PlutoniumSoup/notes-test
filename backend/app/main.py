@@ -11,6 +11,7 @@ from .api.graph import router as graph_router
 from .api.search import router as search_router
 from .api.analyze import router as analyze_router
 from .api.wikipedia import router as wikipedia_router
+from .api.auth import router as auth_router
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -55,6 +56,7 @@ def create_app() -> FastAPI:
             logger.error(f"Startup error: {e}")
             # Приложение продолжит работу даже если некоторые сервисы недоступны
 
+    app.include_router(auth_router)
     app.include_router(notes_router)
     app.include_router(graph_router)
     app.include_router(search_router)

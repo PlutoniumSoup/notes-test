@@ -1,9 +1,14 @@
-FROM node:20-alpine
+FROM node:20-slim
+
 WORKDIR /app
+
+RUN corepack enable && corepack prepare yarn@1.22.22 --activate
+
 COPY package.json ./
-RUN npm install
-COPY . /app
+
+RUN yarn install
+
+COPY . .
+
 EXPOSE 5173
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
-
-
+CMD ["yarn", "run", "dev", "--", "--host", "0.0.0.0"]

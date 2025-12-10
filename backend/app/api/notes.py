@@ -1,18 +1,28 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..db.postgres import get_db_session
-from ..db.models import Note
+from ..db.models import Note, User
 from ..db.elastic import get_es
 from ..models.schemas import NoteCreate, NoteOut, NoteUpdate
 from ..services.llm import analyze_note_with_llm
+from ..core.security import get_current_user
 
 
 router = APIRouter(prefix="/notes", tags=["notes"])
 
 
 @router.post("/", response_model=NoteOut)
-def create_note(payload: NoteCreate, db: Session = Depends(get_db_session)):
-    note = Note(title=payload.title, content=payload.content, tags=payload.tags)
+def create_note(
+    payload: NoteCreate,
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    note = Note(
+        title=payload.title,
+        content=payload.content,
+        tags=payload.tags,
+        user_id=current_user.id
+    )
     db.add(note)
     db.commit()
     db.refresh(note)
@@ -20,6 +30,7 @@ def create_note(payload: NoteCreate, db: Session = Depends(get_db_session)):
     es = get_es()
     es.index(index="notes", id=note.id, document={
         "id": note.id,
+        "user_id": str(note.user_id),
         "title": note.title,
         "content": note.content,
         "tags": note.tags,
@@ -41,16 +52,31 @@ def create_note(payload: NoteCreate, db: Session = Depends(get_db_session)):
 
 
 @router.get("/{note_id}", response_model=NoteOut)
-def get_note(note_id: int, db: Session = Depends(get_db_session)):
-    note = db.get(Note, note_id)
+def get_note(
+    note_id: int,
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    note = db.query(Note).filter(
+        Note.id == note_id,
+        Note.user_id == current_user.id
+    ).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     return note
 
 
 @router.patch("/{note_id}", response_model=NoteOut)
-def update_note(note_id: int, payload: NoteUpdate, db: Session = Depends(get_db_session)):
-    note = db.get(Note, note_id)
+def update_note(
+    note_id: int,
+    payload: NoteUpdate,
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    note = db.query(Note).filter(
+        Note.id == note_id,
+        Note.user_id == current_user.id
+    ).first()
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
     if payload.title is not None:
@@ -65,6 +91,7 @@ def update_note(note_id: int, payload: NoteUpdate, db: Session = Depends(get_db_
     es = get_es()
     es.index(index="notes", id=note.id, document={
         "id": note.id,
+        "user_id": str(note.user_id),
         "title": note.title,
         "content": note.content,
         "tags": note.tags,

@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import List
-from ..services.llm import analyze_note_with_llm, extract_keywords_with_llm, detect_knowledge_gaps
+from ..services.llm import analyze_note_with_llm
+from ..core.security import get_current_user
+from ..db.models import User
 from ..services.wikipedia import populate_knowledge_base_from_keywords
 from ..services.hierarchy import create_hierarchical_graph
 from ..db.neo4j import get_neo4j_driver
@@ -18,7 +20,10 @@ router = APIRouter(prefix="/analyze", tags=["analyze"])
 
 
 @router.post("/note")
-async def analyze_note(content: str = Query(..., min_length=10)):
+async def analyze_note(
+    content: str = Query(..., min_length=10),
+    current_user: User = Depends(get_current_user)
+):
     """
     Анализирует заметку с помощью LLM и создает/связывает узлы графа знаний
     """
@@ -67,7 +72,8 @@ async def analyze_note(content: str = Query(..., min_length=10)):
             concept_hierarchy=concept_hierarchy,
             concept_descriptions=concept_descriptions,
             tags=tags if tags else ["общее"],
-            summary=summary
+            summary=summary,
+            user_id=str(current_user.id)
         )
         logger.info(f"Created {len(created_nodes)} nodes and {len(links)} links")
     except Exception as e:
@@ -100,17 +106,21 @@ async def analyze_note(content: str = Query(..., min_length=10)):
 
 
 @router.get("/graph/{node_id}", response_model=GraphData)
-def get_node_graph(node_id: str):
+def get_node_graph(
+    node_id: str,
+    current_user: User = Depends(get_current_user)
+):
     """Получает граф вокруг узла"""
     driver = get_neo4j_driver()
     with driver.session() as session:
         records = session.run(
             """
-            MATCH (a:Node {id: $id})-[r:RELATED|contains|related_to]-(b:Node)
+            MATCH (a:Node {id: $id, user_id: $user_id})-[r:RELATED|contains|related_to]-(b:Node {user_id: $user_id})
             RETURN a, r, b
             LIMIT 50
             """,
             id=node_id,
+            user_id=str(current_user.id)
         )
         data = graph_from_cypher_records(records)
     return data

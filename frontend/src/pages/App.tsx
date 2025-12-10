@@ -1,16 +1,59 @@
 import React, { useState } from 'react'
+import { useAuth } from '../contexts/AuthContext'
+import { AuthPage } from './AuthPage'
+import { SettingsPage } from './SettingsPage'
+import { ThemeSwitcher } from '../ui/ThemeSwitcher'
 import { Editor } from '../ui/Editor'
 import { GraphView } from '../ui/GraphView'
 import { NodeDetails } from '../ui/NodeDetails'
 import { analyzeNote, createNote } from '../shared/api'
 
+type Page = 'main' | 'settings'
+
 export const App: React.FC = () => {
+  const { user, loading, logout } = useAuth()
+  const [currentPage, setCurrentPage] = useState<Page>('main')
+  
   const [content, setContent] = useState('')
   const [title, setTitle] = useState('')
   const [graph, setGraph] = useState<{ nodes: any[]; links: any[] }>({ nodes: [], links: [] })
   const [selectedNode, setSelectedNode] = useState<any | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<any>(null)
+
+  // Show loading while checking authentication
+  if (loading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center'
+      }}>
+        <div className="spinner" style={{ width: '40px', height: '40px' }} />
+      </div>
+    )
+  }
+
+  // Show auth page if not logged in
+  if (!user) {
+    return <AuthPage />
+  }
+
+  // Show settings page if selected
+  if (currentPage === 'settings') {
+    return (
+      <div>
+        <Header
+          user={user}
+          onNavigate={setCurrentPage}
+          onLogout={logout}
+          currentPage={currentPage}
+        />
+        <SettingsPage />
+      </div>
+    )
+  }
 
   const onAnalyze = async () => {
     if (!content.trim()) {
@@ -22,7 +65,6 @@ export const App: React.FC = () => {
       const result = await analyzeNote(content)
       setAnalysisResult(result)
       
-      // Преобразуем результат в формат для графа
       const nodes = result.nodes.map((n: any) => ({ 
         id: n.id, 
         name: n.label,
@@ -63,166 +105,181 @@ export const App: React.FC = () => {
     }
   }
 
-   return (
-     <div style={{ display: 'grid', gridTemplateColumns: '420px 1fr 360px', height: '100vh', background: '#f8f9fa' }}>
-       <div style={{ padding: 20, borderRight: '1px solid #dee2e6', background: 'white', overflowY: 'auto' }}>
-         <h2 style={{ margin: '0 0 16px 0', fontSize: 24, color: '#212529' }}>Заметка</h2>
-         <input
-           placeholder="Заголовок"
-           value={title}
-           onChange={e => setTitle(e.target.value)}
-           style={{ 
-             width: '100%', 
-             marginBottom: 12, 
-             padding: '10px 12px',
-             border: '1px solid #dee2e6',
-             borderRadius: 6,
-             fontSize: 14
-           }}
-         />
-         <Editor value={content} onChange={setContent} />
-         <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-           <button 
-             onClick={onAnalyze} 
-             disabled={analyzing}
-             style={{
-               flex: 1,
-               padding: '10px 16px',
-               background: analyzing ? '#868e96' : '#4dabf7',
-               color: 'white',
-               border: 'none',
-               borderRadius: 6,
-               fontSize: 14,
-               fontWeight: 500,
-               cursor: analyzing ? 'not-allowed' : 'pointer'
-             }}
-           >
-             {analyzing ? 'Анализ...' : 'Анализ (LLM)'}
-           </button>
-           <button 
-             onClick={onSave}
-             style={{
-               flex: 1,
-               padding: '10px 16px',
-               background: '#51cf66',
-               color: 'white',
-               border: 'none',
-               borderRadius: 6,
-               fontSize: 14,
-               fontWeight: 500,
-               cursor: 'pointer'
-             }}
-           >
-             Сохранить
-           </button>
-         </div>
-         {analysisResult && (
-           <div style={{ marginTop: 16, padding: 16, background: '#f8f9fa', borderRadius: 8, fontSize: 13 }}>
-             <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: '#212529' }}>Результаты анализа</div>
-             
-             <div style={{ marginBottom: 12 }}>
-               <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Модель:</div>
-               <div style={{ fontSize: 12, color: '#212529', fontWeight: 500 }}>
-                 {analysisResult.model_used || 'неизвестно'}
-               </div>
-             </div>
-             
-             {analysisResult.reasoning && (
-               <div style={{ marginBottom: 12, padding: 10, background: 'white', borderRadius: 6 }}>
-                 <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Рассуждения:</div>
-                 <div style={{ fontSize: 12, fontStyle: 'italic', color: '#495057' }}>
-                   {analysisResult.reasoning}
-                 </div>
-               </div>
-             )}
-             
-             {analysisResult.main_topic && (
-               <div style={{ marginBottom: 12 }}>
-                 <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Главная тема:</div>
-                 <div style={{ fontSize: 13, fontWeight: 600, color: '#212529' }}>
-                   {analysisResult.main_topic}
-                 </div>
-               </div>
-             )}
-             
-             {analysisResult.main_concepts && analysisResult.main_concepts.length > 0 && (
-               <div style={{ marginBottom: 12 }}>
-                 <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>Основные концепции:</div>
-                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                   {analysisResult.main_concepts.map((concept: string, idx: number) => (
-                     <span
-                       key={idx}
-                       style={{
-                         padding: '4px 10px',
-                         background: '#e7f5ff',
-                         color: '#1971c2',
-                         borderRadius: 12,
-                         fontSize: 11,
-                         fontWeight: 500
-                       }}
-                     >
-                       {concept}
-                     </span>
-                   ))}
-                 </div>
-               </div>
-             )}
-             
-             {analysisResult.tags && analysisResult.tags.length > 0 && (
-               <div style={{ marginBottom: 12 }}>
-                 <div style={{ fontSize: 11, color: '#666', marginBottom: 6 }}>Теги:</div>
-                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                   {analysisResult.tags.map((tag: string, idx: number) => (
-                     <span
-                       key={idx}
-                       style={{
-                         padding: '4px 10px',
-                         background: '#d0ebff',
-                         color: '#1971c2',
-                         borderRadius: 12,
-                         fontSize: 11,
-                         fontWeight: 500
-                       }}
-                     >
-                       {tag}
-                     </span>
-                   ))}
-                 </div>
-               </div>
-             )}
-             
-             {analysisResult.summary && (
-               <div style={{ marginBottom: 12 }}>
-                 <div style={{ fontSize: 11, color: '#666', marginBottom: 4 }}>Резюме:</div>
-                 <div style={{ fontSize: 12, color: '#495057', lineHeight: 1.5 }}>
-                   {analysisResult.summary}
-                 </div>
-               </div>
-             )}
-             
-             {analysisResult.knowledge_gaps && analysisResult.knowledge_gaps.length > 0 && (
-               <div style={{ marginBottom: 12, padding: 10, background: '#fff3cd', borderRadius: 6 }}>
-                 <div style={{ fontSize: 11, color: '#856404', marginBottom: 4, fontWeight: 600 }}>Пробелы в знаниях:</div>
-                 <div style={{ fontSize: 12, color: '#856404' }}>
-                   {analysisResult.knowledge_gaps.join(', ')}
-                 </div>
-               </div>
-             )}
-             
-             <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid #dee2e6', fontSize: 11, color: '#868e96' }}>
-               Узлов: {analysisResult.nodes?.length || 0} • Связей: {analysisResult.links?.length || 0}
-             </div>
-           </div>
-         )}
-       </div>
-       <div style={{ background: '#f8f9fa' }}>
-         <GraphView data={graph} onSelectNode={setSelectedNode} />
-       </div>
-       <div style={{ padding: 0, borderLeft: '1px solid #dee2e6', background: 'white', overflowY: 'auto' }}>
-         <NodeDetails node={selectedNode} />
-       </div>
-     </div>
-   )
- }
+  return (
+    <div className="fade-in">
+      <Header
+        user={user}
+        onNavigate={setCurrentPage}
+        onLogout={logout}
+        currentPage={currentPage}
+      />
+      <div style={{ display: 'grid', gridTemplateColumns: '420px 1fr 360px', height: 'calc(100vh - 64px)' }}>
+        <div style={{
+          padding: 'var(--space-2xl)',
+          borderRight: '1px solid var(--color-border)',
+          background: 'var(--color-surface)',
+          overflowY: 'auto'
+        }}>
+          <h2 style={{ margin: '0 0 var(--space-xl) 0', fontSize: 'var(--font-size-2xl)' }}>Заметка</h2>
+          <input
+            placeholder="Заголовок"
+            value={title}
+            onChange={e => setTitle(e. target.value)}
+            style={{ marginBottom: 'var(--space-md)' }}
+          />
+          <Editor value={content} onChange={setContent} />
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-md)' }}>
+            <button 
+              onClick={onAnalyze} 
+              disabled={analyzing}
+              className="btn-primary"
+              style={{ flex: 1 }}
+            >
+              {analyzing ? (
+                <>
+                  <div className="spinner" />
+                  Анализ...
+                </>
+              ) : (
+                'Анализ (LLM)'
+              )}
+            </button>
+            <button 
+              onClick={onSave}
+              className="btn-secondary"
+              style={{ flex: 1 }}
+            >
+              Сохранить
+            </button>
+          </div>
+          {analysisResult && (
+            <AnalysisResults result={analysisResult} />
+          )}
+        </div>
+        <div style={{ background: 'var(--color-background)' }}>
+          <GraphView data={graph} onSelectNode={setSelectedNode} />
+        </div>
+        <div style={{
+          padding: 0,
+          borderLeft: '1px solid var(--color-border)',
+          background: 'var(--color-surface)',
+          overflowY: 'auto'
+        }}>
+          <NodeDetails node={selectedNode} />
+        </div>
+      </div>
+    </div>
+  )
+}
 
+// Header component
+interface HeaderProps {
+  user: any
+  onNavigate: (page: Page) => void
+  onLogout: () => void
+  currentPage: Page
+}
 
+const Header: React.FC<HeaderProps> = ({ user, onNavigate, onLogout, currentPage }) => (
+  <div style={{
+    height: '64px',
+    padding: '0 var(--space-2xl)',
+    background: 'var(--color-surface)',
+    borderBottom: '1px solid var(--color-border)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between'
+  }}>
+    <h1 style={{
+      fontSize: 'var(--font-size-xl)',
+      fontWeight: 'var(--font-weight-bold)',
+      color: 'var(--color-primary)',
+      margin: 0
+    }}>
+      KnowYourPath
+    </h1>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-lg)' }}>
+      <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-size-sm)' }}>
+        {user.username}
+      </span>
+      <button
+        onClick={() => onNavigate(currentPage === 'main' ? 'settings' : 'main')}
+        className="btn-ghost"
+      >
+        {currentPage === 'main' ? 'Settings' : 'Notes'}
+      </button>
+      <ThemeSwitcher />
+      <button onClick={onLogout} className="btn-ghost">
+        Logout
+      </button>
+    </div>
+  </div>
+)
+
+// Analysis Results component
+const AnalysisResults: React.FC<{ result: any }> = ({ result }) => (
+  <div style={{
+    marginTop: 'var(--space-xl)',
+    padding: 'var(--space-xl)',
+    background: 'var(--color-background)',
+    borderRadius: 'var(--radius-lg)',
+    fontSize: 'var(--font-size-sm)'
+  }} className="slide-in">
+    <div style={{ fontSize: 'var(--font-size-base)', fontWeight: 600, marginBottom: 'var(--space-md)' }}>
+      Результаты анализа
+    </div>
+    
+    {result.model_used && (
+      <div style={{ marginBottom: 'var(--space-md)' }}>
+        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-xs)' }}>
+          Модель:
+        </div>
+        <div style={{ fontWeight: 500 }}>{result.model_used}</div>
+      </div>
+    )}
+    
+    {result.main_topic && (
+      <div style={{ marginBottom: 'var(--space-md)' }}>
+        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-xs)' }}>
+          Главная тема:
+        </div>
+        <div style={{ fontWeight: 600 }}>{result.main_topic}</div>
+      </div>
+    )}
+    
+    {result.tags && result.tags.length > 0 && (
+      <div style={{ marginBottom: 'var(--space-md)' }}>
+        <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginBottom: 'var(--space-xs)' }}>
+          Теги:
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
+          {result.tags.map((tag: string, idx: number) => (
+            <span
+              key={idx}
+              style={{
+                padding: '4px 10px',
+                background: 'var(--color-primary)',
+                color: 'var(--color-text-inverse)',
+                borderRadius: 'var(--radius-full)',
+                fontSize: 'var(--font-size-xs)',
+                fontWeight: 500
+              }}
+            >
+              {tag}
+            </span>
+          ))}
+        </div>
+      </div>
+    )}
+    
+    <div style={{
+      marginTop: 'var(--space-md)',
+      paddingTop: 'var(--space-md)',
+      borderTop: '1px solid var(--color-border)',
+      fontSize: 'var(--font-size-xs)',
+      color: 'var(--color-text-tertiary)'
+    }}>
+      Узлов: {result.nodes?.length || 0} • Связей: {result.links?.length || 0}
+    </div>
+  </div>
+)

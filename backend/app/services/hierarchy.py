@@ -16,7 +16,8 @@ def create_hierarchical_graph(
     concept_hierarchy: Dict[str, List[str]],
     concept_descriptions: Dict[str, str],
     tags: List[str],
-    summary: str
+    summary: str,
+    user_id: str = None
 ) -> tuple[List[GraphNode], List[GraphLink]]:
     """
     Создает иерархический граф знаний:
@@ -42,18 +43,21 @@ def create_hierarchical_graph(
             has_gap=False,
             level=0
         )
-        upsert_node(session, main_node)
+        upsert_node(session, main_node, user_id=user_id)
         nodes.append(main_node)
         
         # Индексируем в Elasticsearch
-        es.index(index=s.elastic_index_nodes, id=main_node.id, document={
+        es_doc = {
             "id": main_node.id,
             "label": main_node.label,
             "summary": main_node.summary,
             "tags": main_node.tags,
             "has_gap": main_node.has_gap,
             "level": 0
-        })
+        }
+        if user_id:
+            es_doc["user_id"] = user_id
+        es.index(index=s.elastic_index_nodes, id=main_node.id, document=es_doc)
         
         # Создаем узлы первого уровня (основные концепции)
         for concept in main_concepts:
@@ -68,11 +72,11 @@ def create_hierarchical_graph(
                 has_gap=False,
                 level=1
             )
-            upsert_node(session, concept_node)
+            upsert_node(session, concept_node, user_id=user_id)
             nodes.append(concept_node)
             
             # Связываем центральный узел с концепцией первого уровня
-            link_nodes(session, main_node.id, concept_node.id, "contains")
+            link_nodes(session, main_node.id, concept_node.id, "contains", user_id=user_id)
             links.append(GraphLink(
                 source=main_node.id,
                 target=concept_node.id,
@@ -80,14 +84,17 @@ def create_hierarchical_graph(
             ))
             
             # Индексируем в Elasticsearch
-            es.index(index=s.elastic_index_nodes, id=concept_node.id, document={
+            es_doc = {
                 "id": concept_node.id,
                 "label": concept_node.label,
                 "summary": concept_node.summary,
                 "tags": concept_node.tags,
                 "has_gap": concept_node.has_gap,
                 "level": 1
-            })
+            }
+            if user_id:
+                es_doc["user_id"] = user_id
+            es.index(index=s.elastic_index_nodes, id=concept_node.id, document=es_doc)
             
             # Создаем узлы второго уровня (связанные концепции)
             related_concepts = concept_hierarchy.get(concept, [])
@@ -103,11 +110,11 @@ def create_hierarchical_graph(
                     has_gap=False,
                     level=2
                 )
-                upsert_node(session, related_node)
+                upsert_node(session, related_node, user_id=user_id)
                 nodes.append(related_node)
                 
                 # Связываем концепцию первого уровня с концепцией второго уровня
-                link_nodes(session, concept_node.id, related_node.id, "part_of")
+                link_nodes(session, concept_node.id, related_node.id, "part_of", user_id=user_id)
                 links.append(GraphLink(
                     source=concept_node.id,
                     target=related_node.id,
@@ -115,14 +122,17 @@ def create_hierarchical_graph(
                 ))
                 
                 # Индексируем в Elasticsearch
-                es.index(index=s.elastic_index_nodes, id=related_node.id, document={
+                es_doc = {
                     "id": related_node.id,
                     "label": related_node.label,
                     "summary": related_node.summary,
                     "tags": related_node.tags,
                     "has_gap": related_node.has_gap,
                     "level": 2
-                })
+                }
+                if user_id:
+                    es_doc["user_id"] = user_id
+                es.index(index=s.elastic_index_nodes, id=related_node.id, document=es_doc)
     
     return nodes, links
 

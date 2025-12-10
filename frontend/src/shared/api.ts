@@ -2,6 +2,15 @@ import axios from 'axios'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
+// Add token to all requests
+axios.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 export type NoteCreate = { title: string; content: string; tags: string[] }
 
 export async function createNote(payload: NoteCreate) {
@@ -41,5 +50,4 @@ export async function analyzeNote(content: string) {
     throw error
   }
 }
-
 

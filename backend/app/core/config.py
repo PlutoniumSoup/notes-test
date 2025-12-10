@@ -23,8 +23,17 @@ class Settings(BaseSettings):
     elastic_index_notes: str = "notes"
     elastic_index_nodes: str = "nodes"
 
+    llm_provider: str = "timeweb"
+    custom_llm_api_key: str = ""
+    custom_llm_endpoint: str = ""
+
     google_genai_api_key: str = ""
     gemini_api_key: str = ""  # Альтернативное имя для совместимости
+
+    # JWT Authentication
+    secret_key: str = "your-secret-key-change-this-in-production-use-openssl-rand-hex-32"
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 60 * 24 * 7  # 7 days
 
     class Config:
         env_file = ".env"

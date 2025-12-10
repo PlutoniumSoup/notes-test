@@ -4,7 +4,18 @@ from elasticsearch import Elasticsearch
 from ..models.schemas import GraphNode, GraphLink, GraphData
 
 
-def upsert_node(session: Session, node: GraphNode):
+def upsert_node(session: Session, node: GraphNode, user_id: str = None):
+    query_params = {
+        "id": node.id,
+        "label": node.label,
+        "summary": node.summary,
+        "tags": node.tags,
+        "has_gap": node.has_gap,
+        "level": getattr(node, 'level', None),
+    }
+    if user_id:
+        query_params["user_id"] = user_id
+        
     session.run(
         """
         MERGE (n:Node {id: $id})
@@ -12,28 +23,42 @@ def upsert_node(session: Session, node: GraphNode):
             n.summary = $summary,
             n.tags = $tags,
             n.has_gap = $has_gap,
-            n.level = $level
+            n.level = $level,
+            n.user_id = $user_id
         """,
-        id=node.id,
-        label=node.label,
-        summary=node.summary,
-        tags=node.tags,
-        has_gap=node.has_gap,
-        level=getattr(node, 'level', None),
+        **query_params
     )
 
 
-def link_nodes(session: Session, source_id: str, target_id: str, relation: str):
-    session.run(
-        """
-        MATCH (a:Node {id: $source}), (b:Node {id: $target})
-        MERGE (a)-[r:RELATED {relation: $relation}]->(b)
-        RETURN r
-        """,
-        source=source_id,
-        target=target_id,
-        relation=relation,
-    )
+def link_nodes(session: Session, source_id: str, target_id: str, relation: str, user_id: str = None):
+    query_params = {
+        "source": source_id,
+        "target": target_id,
+        "relation": relation,
+    }
+    
+    if user_id:
+        # Only link nodes belonging to the same user
+        session.run(
+            """
+            MATCH (a:Node {id: $source, user_id: $user_id}), (b:Node {id: $target, user_id: $user_id})
+            MERGE (a)-[r:RELATED {relation: $relation}]->(b)
+            RETURN r
+            """,
+            source=source_id,
+            target=target_id,
+            relation=relation,
+            user_id=user_id
+        )
+    else:
+        session.run(
+            """
+            MATCH (a:Node {id: $source}), (b:Node {id: $target})
+            MERGE (a)-[r:RELATED {relation: $relation}]->(b)
+            RETURN r
+            """,
+            **query_params
+        )
 
 
 def search_nodes_by_keywords(es: Elasticsearch, index: str, keywords: List[str], limit: int = 10) -> List[GraphNode]:
