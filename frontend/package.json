@@ -1,25 +1,25 @@
- {
-   "name": "knowyourpath-frontend",
-   "private": true,
-   "version": "0.1.0",
-   "type": "module",
-   "scripts": {
-     "dev": "vite",
-     "build": "vite build",
-     "preview": "vite preview"
-   },
+{
+  "name": "knowyourpath-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
   "dependencies": {
     "axios": "^1.7.7",
+    "iconsax-react": "^0.0.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-force-graph-2d": "^1.29.0"
   },
-   "devDependencies": {
-     "@vitejs/plugin-react": "^4.3.3",
-     "@types/react": "^18.3.5",
-     "@types/react-dom": "^18.3.0",
-     "typescript": "^5.6.3",
-     "vite": "^5.4.8"
-   }
- }
-
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.3",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.8"
+  }
+}

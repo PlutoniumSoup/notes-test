@@ -172,12 +172,15 @@ See `design-system.md` for:
 - Spacing system
 - Component patterns
 - Animation guidelines
+- **Glassmorphism effects**: Current UX redesign focus
 
 Key principles:
 - Use CSS variables for all colors/spacing
 - Support theme switching at runtime
+- **Dark theme by default** for premium feel
 - Smooth transitions (250ms default)
 - Accessible contrast ratios
+- **Glassmorphism**: backdrop-filter blur effects for cards/panels
 
 ---
 
@@ -263,11 +266,11 @@ No Redux/MobX currently. Keep it simple.
 ## Known Issues & Limitations
 
 1. **No automated tests**: All testing is manual
-2. **No user authentication yet**: Planned in current sprint
-3. **No dark theme yet**: Planned in current sprint
-4. **No version history**: Planned for future
-5. **No collaborative editing**: Future feature
-6. **Limited error handling**: Mostly using `alert()`
+2. **Limited error handling**: Mostly using `alert()` (toast notifications planned)
+3. **No version history**: Planned for future (UC-02)
+4. **No collaborative editing**: Future feature (UC-15)
+5. **No collections/folders yet**: Planned (UC-12)
+6. **Auto-save in progress**: Currently implementing debounced auto-save
 
 ---
 
@@ -304,11 +307,13 @@ No Redux/MobX currently. Keep it simple.
 ## Future Roadmap
 
 Short-term:
-- ✅ User authentication
-- ✅ Theme switching
-- ✅ Model selection
+- ✅ User authentication (JWT + protected routes)
+- ✅ Theme switching (light/dark with CSS variables)
+- ✅ Model selection (Gemini, Timeweb, Custom)
+- 🔄 **Glassmorphism UX redesign** (in progress)
+- 🔄 **Auto-save notes** (in progress)
 - Profile editing
-- Better error handling (toast notifications)
+- Better error handling (toast notifications planned)
 
 Medium-term:
 - Automated tests

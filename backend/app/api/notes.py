@@ -51,6 +51,18 @@ def create_note(
     return note
 
 
+@router.get("/", response_model=list[NoteOut])
+def list_notes(
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all notes for current user"""
+    notes = db.query(Note).filter(
+        Note.user_id == current_user.id
+    ).order_by(Note.created_at.desc()).all()
+    return notes
+
+
 @router.get("/{note_id}", response_model=NoteOut)
 def get_note(
     note_id: int,
@@ -109,3 +121,30 @@ def update_note(
             print(f"LLM analysis error: {e}")
 
     return note
+
+
+@router.delete("/{note_id}")
+def delete_note(
+    note_id: int,
+    db: Session = Depends(get_db_session),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a note"""
+    note = db.query(Note).filter(
+        Note.id == note_id,
+        Note.user_id == current_user.id
+    ).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+    
+    db.delete(note)
+    db.commit()
+    
+    # Delete from Elasticsearch
+    try:
+        es = get_es()
+        es.delete(index="notes", id=note_id)
+    except Exception as e:
+        print(f"ES delete error: {e}")
+    
+    return {"status": "deleted"}

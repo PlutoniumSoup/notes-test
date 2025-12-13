@@ -94,21 +94,61 @@ def analyze_note_with_llm(content: str) -> Optional[Dict]:
     try:
         client = get_llm_client()
         if client:
-            prompt = f"""Ты — эксперт по анализу текстов и построению графов знаний. Проанализируй заметку и верни JSON.
-Заметка:
+            prompt = f"""You are a knowledge graph extraction expert. Extract ONLY the concepts and relationships EXPLICITLY mentioned in the text.
+
+CRITICAL RULES:
+1. Always respond in the SAME LANGUAGE as the input text (Russian → Russian, English → English)
+2. Extract ONLY concepts that are DIRECTLY MENTIONED in the text
+3. Create relationships ONLY between concepts that have EXPLICIT connections in the text
+4. DO NOT create a central summary node
+5. DO NOT describe the note itself
+6. Build a chain/hierarchy of concepts as described in the text
+
+Input text:
 {content}
 
-Формат ответа:
+Return JSON with this EXACT structure:
 {{
-  "main_topic": "",
-  "main_concepts": [],
-  "concept_hierarchy": {{}},
-  "concept_descriptions": {{}},
-  "tags": [],
-  "summary": "",
-  "knowledge_gaps": [],
-  "reasoning": ""
-}}"""
+  "concepts": [
+    {{
+      "id": "concept_1",
+      "label": "Concept Name",
+      "description": "Brief 1-sentence description of this concept from the text"
+    }}
+  ],
+  "relationships": [
+    {{
+      "source": "concept_1",
+      "target": "concept_2",
+      "type": "consists_of|part_of|related_to|property_of",
+      "description": "How they are connected"
+    }}
+  ],
+  "tags": ["tag1", "tag2"],
+  "main_topic": "One sentence about what the note discusses"
+}}
+
+EXAMPLES of correct extraction:
+
+Input: "Человек состоит из органов, органы из тканей, ткани из клеток"
+Output:
+{{
+  "concepts": [
+    {{"id": "concept_human", "label": "Человек", "description": "Биологический организм"}},
+    {{"id": "concept_organs", "label": "Органы", "description": "Части тела человека"}},
+    {{"id": "concept_tissues", "label": "Ткани", "description": "Структурные компоненты органов"}},
+    {{"id": "concept_cells", "label": "Клетки", "description": "Основные единицы тканей"}}
+  ],
+  "relationships": [
+    {{"source": "concept_human", "target": "concept_organs", "type": "consists_of", "description": "состоит из"}},
+    {{"source": "concept_organs", "target": "concept_tissues", "type": "consists_of", "description": "состоят из"}},
+    {{"source": "concept_tissues", "target": "concept_cells", "type": "consists_of", "description": "состоят из"}}
+  ],
+  "tags": ["биология", "анатомия"],
+  "main_topic": "Иерархическая структура организма"
+}}
+
+Now extract from the actual input text above."""
 
             text = client.generate(prompt, model="grok-code-fast-1")
 
@@ -121,8 +161,20 @@ def analyze_note_with_llm(content: str) -> Optional[Dict]:
             text = text.strip()
 
             result = json.loads(text)
-            result["model_used"] = getattr(client, "__class__", type(client)).__name__
-            logger.info("LLM analysis successful via custom endpoint")
+            
+            # Правильное имя модели
+            settings = get_settings()
+            provider = getattr(settings, "llm_provider", "google")
+            if provider == "google":
+                result["model_used"] = "Google Gemini"
+            elif provider == "timeweb":
+                result["model_used"] = "Timeweb Grok"
+            elif provider == "custom":
+                result["model_used"] = "Custom LLM"
+            else:
+                result["model_used"] = "Unknown"
+                
+            logger.info("LLM analysis successful")
             return result
 
     except Exception as e:

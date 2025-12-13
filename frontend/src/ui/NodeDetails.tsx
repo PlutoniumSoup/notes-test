@@ -1,6 +1,53 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
+import { updateNode, deleteNode, createLink, getAllGraph, GraphNode } from '../shared/api'
+import { CloseCircle, Edit2, Trash, Add, TickCircle, TickSquare } from 'iconsax-react'
 
-export const NodeDetails: React.FC<{ node: any | null }> = ({ node }) => {
+interface NodeDetailsProps {
+  node: any | null
+  onClose: () => void
+  onUpdate: () => void
+  onDelete: () => void
+  onTagClick?: (tag: string | null) => void
+  onMultiSelect?: () => void
+  multiSelectMode?: boolean
+}
+
+export const NodeDetails: React.FC<NodeDetailsProps> = ({ 
+  node, 
+  onClose, 
+  onUpdate, 
+  onDelete,
+  onTagClick,
+  onMultiSelect,
+  multiSelectMode = false
+}) => {
+  const [isEditing, setIsEditing] = useState(false)
+  const [editedLabel, setEditedLabel] = useState(node?.label || '')
+  const [editedSummary, setEditedSummary] = useState(node?.summary || '')
+  const [isSaving, setIsSaving] = useState(false)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [showAddLink, setShowAddLink] = useState(false)
+  const [linkTarget, setLinkTarget] = useState('')
+  const [linkRelation, setLinkRelation] = useState('related_to')
+  const [allNodes, setAllNodes] = useState<any[]>([])
+
+  useEffect(() => {
+    // Синхронизируем состояние редактирования с текущим узлом
+    if (!isEditing) {
+      setEditedLabel(node?.label || '')
+      setEditedSummary(node?.summary || '')
+    }
+  }, [node, isEditing])
+
+  useEffect(() => {
+    if (showAddLink) {
+      // Загружаем все узлы для выбора цели связи
+      getAllGraph().then(data => {
+        setAllNodes(data.nodes.filter(n => n.id !== node?.id))
+      })
+    }
+  }, [showAddLink, node])
+
   if (!node) {
     return (
       <div style={{ padding: 16, color: '#666', textAlign: 'center' }}>
@@ -8,7 +55,7 @@ export const NodeDetails: React.FC<{ node: any | null }> = ({ node }) => {
       </div>
     )
   }
-  
+
   const getNodeType = () => {
     if (node.id?.startsWith('topic_')) return 'Главная тема'
     if (node.id?.startsWith('concept_')) return 'Основная концепция'
@@ -16,45 +63,184 @@ export const NodeDetails: React.FC<{ node: any | null }> = ({ node }) => {
     if (node.id?.startsWith('wiki_')) return 'Статья Wikipedia'
     return 'Узел'
   }
-  
+
   const getLevelLabel = () => {
     if (node.level === 0) return 'Центральный узел'
     if (node.level === 1) return 'Первый уровень'
     if (node.level === 2) return 'Второй уровень'
     return ''
   }
-  
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    try {
+      await updateNode(node.id, {
+        id: node.id,
+        label: editedLabel,
+        summary: editedSummary,
+        tags: node.tags || [],
+        has_gap: node.has_gap || false,
+        level: node.level
+      })
+      setIsEditing(false)
+      onUpdate()
+    } catch (error: any) {
+      alert(`Ошибка при сохранении: ${error.response?.data?.detail || error.message}`)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirm(`Удалить узел "${node.label}"? Это действие нельзя отменить.`)) {
+      return
+    }
+    setIsDeleting(true)
+    try {
+      await deleteNode(node.id)
+      onDelete()
+    } catch (error: any) {
+      alert(`Ошибка при удалении: ${error.response?.data?.detail || error.message}`)
+      setIsDeleting(false)
+    }
+  }
+
+  const handleAddLink = async () => {
+    if (!linkTarget) {
+      alert('Выберите целевой узел')
+      return
+    }
+    try {
+      await createLink({
+        source: node.id,
+        target: linkTarget,
+        relation: linkRelation
+      })
+      setShowAddLink(false)
+      setLinkTarget('')
+      setLinkRelation('related_to')
+      onUpdate()
+    } catch (error: any) {
+      alert(`Ошибка при создании связи: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>{getNodeType()}</div>
-        <h2 style={{ margin: 0, fontSize: 20, color: '#212529' }}>{node.label || node.name}</h2>
-        {getLevelLabel() && (
-          <div style={{ fontSize: 11, color: '#868e96', marginTop: 4 }}>{getLevelLabel()}</div>
+    <div style={{ padding: 'var(--space-xl)' }}>
+      {/* Header with close button */}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'flex-start',
+        marginBottom: 'var(--space-lg)'
+      }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginBottom: 4 }}>
+            {getNodeType()}
+          </div>
+          {isEditing ? (
+            <input
+              value={editedLabel}
+              onChange={e => setEditedLabel(e.target.value)}
+              className="glass-input"
+              style={{ marginBottom: 'var(--space-sm)', width: '100%' }}
+              placeholder="Название узла"
+            />
+          ) : (
+            <h2 style={{ margin: 0, fontSize: 'var(--font-size-xl)', color: 'var(--color-text-primary)' }}>
+              {node.label || node.name}
+            </h2>
+          )}
+          {getLevelLabel() && (
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-text-tertiary)', marginTop: 4 }}>
+              {getLevelLabel()}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          className="btn-ghost"
+          style={{ padding: 'var(--space-xs)', minWidth: 'auto' }}
+          title="Закрыть"
+        >
+          <CloseCircle size={20} />
+        </button>
+      </div>
+
+      {/* Description */}
+      <div style={{ marginBottom: 'var(--space-lg)' }}>
+        <div style={{ 
+          fontSize: 'var(--font-size-xs)', 
+          color: 'var(--color-text-tertiary)', 
+          marginBottom: 'var(--space-sm)', 
+          fontWeight: 600 
+        }}>
+          Описание:
+        </div>
+        {isEditing ? (
+          <textarea
+            value={editedSummary}
+            onChange={e => setEditedSummary(e.target.value)}
+            className="glass-input"
+            style={{ 
+              width: '100%', 
+              minHeight: '100px',
+              resize: 'vertical'
+            }}
+            placeholder="Описание узла"
+          />
+        ) : (
+          <div style={{ 
+            padding: 'var(--space-md)', 
+            background: 'var(--glass-bg)', 
+            borderRadius: 'var(--radius-md)',
+            fontSize: 'var(--font-size-sm)',
+            lineHeight: 1.6, 
+            color: 'var(--color-text-primary)',
+            border: '1px solid var(--glass-border)'
+          }}>
+            {node.summary || 'Нет описания'}
+          </div>
         )}
       </div>
-      
-      {node.summary && (
-        <div style={{ marginBottom: 16, padding: 12, background: '#f8f9fa', borderRadius: 6 }}>
-          <div style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: 600 }}>Описание:</div>
-          <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: '#212529' }}>{node.summary}</p>
-        </div>
-      )}
-      
+
+      {/* Tags */}
       {node.tags && node.tags.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: '#666', marginBottom: 6, fontWeight: 600 }}>Теги:</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+        <div style={{ marginBottom: 'var(--space-lg)' }}>
+          <div style={{ 
+            fontSize: 'var(--font-size-xs)', 
+            color: 'var(--color-text-tertiary)', 
+            marginBottom: 'var(--space-sm)', 
+            fontWeight: 600 
+          }}>
+            Теги:
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--space-xs)' }}>
             {node.tags.map((tag: string, idx: number) => (
               <span
                 key={idx}
+                onClick={() => onTagClick?.(tag)}
                 style={{
                   padding: '4px 10px',
-                  background: '#e7f5ff',
-                  color: '#1971c2',
-                  borderRadius: 12,
-                  fontSize: 12,
-                  fontWeight: 500
+                  background: 'var(--color-primary)',
+                  color: 'var(--color-text-inverse)',
+                  borderRadius: 'var(--radius-full)',
+                  fontSize: 'var(--font-size-xs)',
+                  fontWeight: 500,
+                  cursor: onTagClick ? 'pointer' : 'default',
+                  transition: 'all var(--transition-fast)'
+                }}
+                onMouseEnter={(e) => {
+                  if (onTagClick) {
+                    e.currentTarget.style.transform = 'scale(1.1)'
+                    e.currentTarget.style.boxShadow = 'var(--shadow-md)'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (onTagClick) {
+                    e.currentTarget.style.transform = 'scale(1)'
+                    e.currentTarget.style.boxShadow = 'none'
+                  }
                 }}
               >
                 {tag}
@@ -63,16 +249,194 @@ export const NodeDetails: React.FC<{ node: any | null }> = ({ node }) => {
           </div>
         </div>
       )}
-      
+
+      {/* Knowledge Gap */}
       {node.has_gap && (
-        <div style={{ padding: 10, background: '#fff3cd', borderRadius: 6, marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: '#856404', fontWeight: 600 }}>
+        <div style={{ 
+          padding: 'var(--space-md)', 
+          background: 'var(--color-warning)', 
+          borderRadius: 'var(--radius-md)', 
+          marginBottom: 'var(--space-lg)',
+          opacity: 0.2
+        }}>
+          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-warning)', fontWeight: 600 }}>
             ⚠️ Здесь есть что изучить
           </div>
         </div>
       )}
-      
-      <div style={{ fontSize: 11, color: '#868e96', marginTop: 16, paddingTop: 16, borderTop: '1px solid #dee2e6' }}>
+
+      {/* Actions */}
+      <div style={{ 
+        marginTop: 'var(--space-xl)', 
+        paddingTop: 'var(--space-lg)', 
+        borderTop: '1px solid var(--glass-border)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--space-sm)'
+      }}>
+        {isEditing ? (
+          <>
+            <button
+              onClick={handleSave}
+              disabled={isSaving || !editedLabel.trim()}
+              className="btn-primary"
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-sm)' }}
+            >
+              {isSaving ? (
+                <>
+                  <div className="spinner" />
+                  Сохранение...
+                </>
+              ) : (
+                <>
+                  <TickCircle size={18} />
+                  Сохранить
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => {
+                setIsEditing(false)
+                setEditedLabel(node.label || '')
+                setEditedSummary(node.summary || '')
+              }}
+              className="btn-ghost"
+              style={{ width: '100%' }}
+            >
+              Отмена
+            </button>
+          </>
+        ) : (
+          <>
+            <button
+              onClick={() => {
+                setIsEditing(true)
+                setEditedLabel(node.label || '')
+                setEditedSummary(node.summary || '')
+              }}
+              className="btn-ghost"
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-sm)' }}
+            >
+              <Edit2 size={18} />
+              Редактировать
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="btn-ghost"
+              style={{ 
+                width: '100%', 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                gap: 'var(--space-sm)',
+                color: 'var(--color-error)',
+                borderColor: 'var(--color-error)'
+              }}
+            >
+              {isDeleting ? (
+                <>
+                  <div className="spinner" />
+                  Удаление...
+                </>
+              ) : (
+                <>
+                  <Trash size={18} />
+                  Удалить узел
+                </>
+              )}
+            </button>
+            <button
+              onClick={() => setShowAddLink(!showAddLink)}
+              className="btn-ghost"
+              style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-sm)' }}
+            >
+              <Add size={18} />
+              {showAddLink ? 'Отмена' : 'Добавить связь'}
+            </button>
+            {onMultiSelect && (
+              <button
+                onClick={onMultiSelect}
+                className="btn-ghost"
+                style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-sm)' }}
+              >
+                <TickSquare size={18} />
+                Выбрать группу узлов
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Add Link Form */}
+        {showAddLink && !isEditing && (
+          <div style={{
+            marginTop: 'var(--space-md)',
+            padding: 'var(--space-md)',
+            background: 'var(--glass-bg)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--glass-border)'
+          }}>
+            <label style={{ 
+              display: 'block', 
+              marginBottom: 'var(--space-sm)', 
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 600,
+              color: 'var(--color-text-secondary)'
+            }}>
+              Целевой узел:
+            </label>
+            <select
+              value={linkTarget}
+              onChange={e => setLinkTarget(e.target.value)}
+              className="glass-input"
+              style={{ marginBottom: 'var(--space-sm)', width: '100%' }}
+            >
+              <option value="">Выберите узел</option>
+              {allNodes.map(n => (
+                <option key={n.id} value={n.id}>{n.label}</option>
+              ))}
+            </select>
+            <label style={{ 
+              display: 'block', 
+              marginBottom: 'var(--space-sm)', 
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 600,
+              color: 'var(--color-text-secondary)'
+            }}>
+              Тип связи:
+            </label>
+            <select
+              value={linkRelation}
+              onChange={e => setLinkRelation(e.target.value)}
+              className="glass-input"
+              style={{ marginBottom: 'var(--space-sm)', width: '100%' }}
+            >
+              <option value="related_to">Связано с</option>
+              <option value="contains">Содержит</option>
+              <option value="part_of">Часть</option>
+              <option value="similar_to">Похоже на</option>
+              <option value="depends_on">Зависит от</option>
+            </select>
+            <button
+              onClick={handleAddLink}
+              disabled={!linkTarget}
+              className="btn-primary"
+              style={{ width: '100%', marginTop: 'var(--space-sm)' }}
+            >
+              Создать связь
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Node ID */}
+      <div style={{ 
+        fontSize: 'var(--font-size-xs)', 
+        color: 'var(--color-text-tertiary)', 
+        marginTop: 'var(--space-lg)', 
+        paddingTop: 'var(--space-lg)', 
+        borderTop: '1px solid var(--glass-border)'
+      }}>
         ID: {node.id}
       </div>
     </div>

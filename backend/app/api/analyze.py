@@ -22,6 +22,7 @@ router = APIRouter(prefix="/analyze", tags=["analyze"])
 @router.post("/note")
 async def analyze_note(
     content: str = Query(..., min_length=10),
+    note_id: str = Query(None),  # Optional note ID for tracking
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -32,76 +33,124 @@ async def analyze_note(
     analysis = analyze_note_with_llm(content)
     if not analysis:
         return {
-            "keywords": [],
             "tags": [],
-            "summary": "",
-            "knowledge_gaps": [],
             "nodes": [],
             "links": [],
             "model_used": "none",
-            "reasoning": "Анализ не удался"
+            "main_topic": "Анализ не удался"
         }
 
-    # Извлекаем данные из анализа
-    main_topic = analysis.get("main_topic", "")
-    main_concepts = analysis.get("main_concepts", [])
-    concept_hierarchy = analysis.get("concept_hierarchy", {})
-    concept_descriptions = analysis.get("concept_descriptions", {})
+    # Обработка НОВОГО формата (concepts/relationships)
+    concepts = analysis.get("concepts", [])
+    relationships = analysis.get("relationships", [])
     tags = analysis.get("tags", [])
-    summary = analysis.get("summary", "")
-    knowledge_gaps = analysis.get("knowledge_gaps", [])
+    main_topic = analysis.get("main_topic", "")
     model_used = analysis.get("model_used", "unknown")
-    reasoning = analysis.get("reasoning", "")
     
-    # Fallback на старый формат, если новый не поддерживается
-    keywords = []
-    if not main_topic and not main_concepts:
-        keywords = analysis.get("keywords", [])
-        main_topic = summary[:50] if summary else "Заметка"
-        main_concepts = keywords[:5] if keywords else []
-        concept_hierarchy = {}
-        concept_descriptions = {k: f"Концепция: {k}" for k in keywords}
-    
-    logger.info(f"Analysis completed. Model: {model_used}, Main topic: {main_topic}, Concepts: {main_concepts}")
+    logger.info(f"Analysis completed. Model: {model_used}, Topic: {main_topic}, Concepts: {len(concepts)}")
 
-    # Создаем иерархический граф
+    # Создаем узлы из концептов
+    created_nodes = []
+    node_id_map = {}  # map concept_id -> node_id
+    
+    driver = get_neo4j_driver()
+    
     try:
-        created_nodes, links = create_hierarchical_graph(
-            main_topic=main_topic,
-            main_concepts=main_concepts,
-            concept_hierarchy=concept_hierarchy,
-            concept_descriptions=concept_descriptions,
-            tags=tags if tags else ["общее"],
-            summary=summary,
-            user_id=str(current_user.id)
-        )
+        with driver.session() as session:
+            # Создаем/обновляем узлы для каждого концепта
+            for concept in concepts:
+                concept_id = concept.get("id", "")
+                label = concept.get("label", "")
+                description = concept.get("description", "")
+                
+                # Генерируем стабильный ID на основе label и user_id
+                stable_id = hashlib.md5(f"{label}_{current_user.id}".encode()).hexdigest()[:16]
+                
+                # Upsert узел в Neo4j
+                result = session.run(
+                    """
+                    MERGE (n:Node {id: $id, user_id: $user_id})
+                    ON CREATE SET 
+                        n.label = $label,
+                        n.summary = $description,
+                        n.tags = $tags,
+                        n.created_at = datetime(),
+                        n.has_gap = false,
+                        n.level = 0
+                    ON MATCH SET
+                        n.summary = CASE WHEN n.summary IS NULL OR n.summary = '' THEN $description ELSE n.summary END,
+                        n.updated_at = datetime()
+                    WITH n
+                    OPTIONAL MATCH (note:Note {id: $note_id}) 
+                    WHERE $note_id IS NOT NULL
+                    FOREACH(_ IN CASE WHEN note IS NOT NULL THEN [1] ELSE [] END |
+                        MERGE (n)-[:MENTIONED_IN]->(note)
+                    )
+                    RETURN n
+                    """,
+                    id=stable_id,
+                    user_id=str(current_user.id),
+                    label=label,
+                    description=description,
+                    tags=tags,
+                    note_id=note_id
+                )
+                
+                node_id_map[concept_id] = stable_id
+                created_nodes.append({
+                    "id": stable_id,
+                    "label": label,
+                    "summary": description,
+                    "has_gap": False,
+                    "level": 0,
+                    "tags": tags
+                })
+            
+            # Создаем связи между узлами
+            links = []
+            for rel in relationships:
+                source_concept_id = rel.get("source", "")
+                target_concept_id = rel.get("target", "")
+                rel_type = rel.get("type", "related_to")
+                rel_desc = rel.get("description", "")
+                
+                source_id = node_id_map.get(source_concept_id)
+                target_id = node_id_map.get(target_concept_id)
+                
+                if source_id and target_id:
+                    session.run(
+                        """
+                        MATCH (a:Node {id: $source_id, user_id: $user_id})
+                        MATCH (b:Node {id: $target_id, user_id: $user_id})
+                        MERGE (a)-[r:RELATED {type: $rel_type}]->(b)
+                        ON CREATE SET r.description = $description
+                        """,
+                        source_id=source_id,
+                        target_id=target_id,
+                        user_id=str(current_user.id),
+                        rel_type=rel_type,
+                        description=rel_desc
+                    )
+                    links.append({
+                        "source": source_id,
+                        "target": target_id,
+                        "relation": rel_type
+                    })
+            
         logger.info(f"Created {len(created_nodes)} nodes and {len(links)} links")
+        
     except Exception as e:
-        logger.error(f"Failed to create hierarchical graph: {e}")
+        logger.error(f"Failed to create graph: {e}")
         logger.exception(e)
         created_nodes = []
         links = []
 
     return {
         "main_topic": main_topic,
-        "main_concepts": main_concepts,
         "tags": tags if tags else ["общее"],
-        "summary": summary,
-        "knowledge_gaps": knowledge_gaps,
-        "nodes": [
-            {
-                "id": n.id,
-                "label": n.label,
-                "summary": n.summary,
-                "has_gap": n.has_gap,
-                "level": getattr(n, 'level', None),
-                "tags": n.tags
-            }
-            for n in created_nodes
-        ],
-        "links": [{"source": l.source, "target": l.target, "relation": l.relation} for l in links],
-        "model_used": model_used,
-        "reasoning": reasoning
+        "nodes": created_nodes,
+        "links": links,
+        "model_used": model_used
     }
 
 
@@ -125,3 +174,84 @@ def get_node_graph(
         data = graph_from_cypher_records(records)
     return data
 
+
+@router.get("/node/{node_id}/notes")
+def get_node_notes(
+    node_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Получает список заметок, в которых упоминается узел"""
+    driver = get_neo4j_driver()
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (n:Node {id: $node_id, user_id: $user_id})-[:MENTIONED_IN]->(note:Note)
+            RETURN note.id AS id, note.title AS title, note.created_at AS created_at
+            ORDER BY note.created_at DESC
+            """,
+            node_id=node_id,
+            user_id=str(current_user.id)
+        )
+        notes = [{"id": r["id"], "title": r["title"], "created_at": str(r["created_at"])} for r in result]
+    return {"notes": notes}
+
+
+@router.patch("/node/{node_id}")
+def update_node(
+    node_id: str,
+    label: str = None,
+    summary: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    """Обновляет узел графа"""
+    driver = get_neo4j_driver()
+    updates = []
+    params = {"node_id": node_id, "user_id": str(current_user.id)}
+    
+    if label is not None:
+        updates.append("n.label = $label")
+        params["label"] = label
+    if summary is not None:
+        updates.append("n.summary = $summary")
+        params["summary"] = summary
+    
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    with driver.session() as session:
+        result = session.run(
+            f"""
+            MATCH (n:Node {{id: $node_id, user_id: $user_id}})
+            SET {', '.join(updates)}, n.updated_at = datetime()
+            RETURN n
+            """,
+            **params
+        )
+        if not result.single():
+            raise HTTPException(status_code=404, detail="Node not found")
+    
+    return {"status": "updated", "node_id": node_id}
+
+
+@router.delete("/node/{node_id}")
+def delete_node(
+    node_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Удаляет узел графа и все его связи"""
+    driver = get_neo4j_driver()
+    with driver.session() as session:
+        result = session.run(
+            """
+            MATCH (n:Node {id: $node_id, user_id: $user_id})
+            DETACH DELETE n
+            RETURN count(n) AS deleted
+            """,
+            node_id=node_id,
+            user_id=str(current_user.id)
+        )
+        record = result.single()
+        if not record or record["deleted"] == 0:
+            raise HTTPException(status_code=404, detail="Node not found")
+    
+    return {"status": "deleted", "node_id": node_id}

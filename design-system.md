@@ -109,6 +109,42 @@ Based on 4px grid:
 
 ---
 
+## Glassmorphism
+
+Modern glass-like frosted effect for premium UI feel.
+
+### Glass Background Variables
+```css
+--glass-bg-light: rgba(255, 255, 255, 0.7);
+--glass-bg-dark: rgba(30, 41, 59, 0.7);
+--glass-border-light: rgba(255, 255, 255, 0.18);
+--glass-border-dark: rgba(255, 255, 255, 0.1);
+```
+
+### Glass Effects
+- **Backdrop filter**: `blur(10px) saturate(180%)`
+- **Background**: Semi-transparent with opacity 0.7-0.9
+- **Border**: 1px solid with low opacity (rgba white 0.1-0.2)
+- **Shadow**: Subtle elevated shadow
+
+### Usage Examples
+**Glass Card:**
+```css
+background: var(--glass-bg);
+backdrop-filter: blur(10px) saturate(180%);
+border: 1px solid var(--glass-border);
+box-shadow: var(--shadow-md);
+```
+
+**Glass Panel (Editor, Settings):**
+```css
+background: rgba(255, 255, 255, 0.05);
+backdrop-filter: blur(20px);
+border: 1px solid rgba(255, 255, 255, 0.1);
+```
+
+---
+
 ## Animations & Transitions
 
 ### Duration
