@@ -77,6 +77,8 @@ class GraphNode(BaseModel):
     tags: List[str] = Field(default_factory=list)
     has_gap: bool = False
     level: Optional[int] = None  # 0 - центральный узел, 1 - первый уровень, 2 - второй уровень
+    knowledge_gaps: List[str] = Field(default_factory=list)
+    recommendations: List[str] = Field(default_factory=list)
 
 
 class GraphLink(BaseModel):

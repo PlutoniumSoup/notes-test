@@ -26,6 +26,8 @@ export const App: React.FC = () => {
   const [highlightedTag, setHighlightedTag] = useState<string | null>(null)
   const [selectedNodes, setSelectedNodes] = useState<Set<string>>(new Set())
   const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [leftPanelWidth, setLeftPanelWidth] = useState(420)
+  const [isResizing, setIsResizing] = useState(false)
 
   // Load graph and notes on mount
   useEffect(() => {
@@ -45,6 +47,8 @@ export const App: React.FC = () => {
             has_gap: n.has_gap,
             level: n.level,
             tags: n.tags || [],
+            knowledge_gaps: n.knowledge_gaps || [],
+            recommendations: n.recommendations || [],
             ...n
           })),
           links: graphData.links
@@ -101,7 +105,9 @@ export const App: React.FC = () => {
           onLogout={logout}
           currentPage={currentPage}
         />
-        <SettingsPage onBack={() => setCurrentPage('main')} />
+        <SettingsPage onBack={() => {
+          setCurrentPage('main')
+        }} />
       </div>
     )
   }
@@ -125,6 +131,8 @@ export const App: React.FC = () => {
         has_gap: n.has_gap,
         level: n.level,
         tags: n.tags || [],
+        knowledge_gaps: n.knowledge_gaps || [],
+        recommendations: n.recommendations || [],
         ...n
       }))
       const newLinks = result.links.map((l: any) => ({
@@ -225,75 +233,32 @@ export const App: React.FC = () => {
         currentPage={currentPage}
       />
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: selectedNode ? '420px 1fr 360px' : '420px 1fr',
+        position: 'relative',
         height: 'calc(100vh - 64px)',
         marginTop: '64px',
-        transition: 'grid-template-columns var(--transition-normal)'
+        overflow: 'hidden'
       }}>
-        {/* Left Panel - Transparent, only editor + history */}
-        <div style={{
-          padding: 'var(--space-2xl)',
-          borderRight: '1px solid var(--glass-border)',
-          overflowY: 'auto',
-          background: 'transparent', // Полностью прозрачный фон
+        {/* Graph - Full width behind panels */}
+        <div style={{ 
+          width: '100%',
+          height: '100%',
+          background: 'var(--color-background)', 
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0
         }}>
-          <h2 style={{ margin: '0 0 var(--space-xl) 0', fontSize: 'var(--font-size-2xl)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-            <DocumentCopy size={24} variant="Bold" />
-            Заметка
-          </h2>
-          <input
-            placeholder="Заголовок (опционально)"
-            value={title}
-            onChange={e => setTitle(e.target.value)}
-            className="glass-input"
-            style={{ marginBottom: 'var(--space-md)', width: '100%' }}
-          />
-          <Editor value={content} onChange={setContent} />
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-md)' }}>
-            <button
-              onClick={onAnalyze}
-              disabled={analyzing}
-              className="btn-primary"
-              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-sm)' }}
-            >
-              {analyzing ? (
-                <>
-                  <div className="spinner" />
-                  Модель думает...
-                </>
-              ) : (
-                <>
-                  <Flash size={20} variant="Bold" />
-                  Анализировать
-                </>
-              )}
-            </button>
-          </div>
-          {analysisResult && (
-            <AnalysisResults 
-              result={analysisResult} 
-              onTagClick={setHighlightedTag}
-            />
-          )}
-          <NotesHistory
-            notes={notes}
-            onSelectNote={onSelectNote}
-            onDeleteNote={onDeleteNote}
-          />
-        </div>
-
-        {/* Graph - Full width */}
-        <div style={{ background: 'var(--color-background)', position: 'relative' }}>
           {/* Multi-select toolbar */}
           {multiSelectMode && (
             <div style={{
               position: 'absolute',
               top: 'var(--space-md)',
-              left: 'var(--space-md)',
+              left: `calc(${leftPanelWidth}px + var(--space-md))`,
               zIndex: 100,
               background: 'var(--glass-bg)',
               backdropFilter: 'blur(10px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(10px) saturate(180%)',
               border: '1px solid var(--glass-border)',
               borderRadius: 'var(--radius-lg)',
               padding: 'var(--space-md)',
@@ -329,6 +294,8 @@ export const App: React.FC = () => {
                         has_gap: n.has_gap,
                         level: n.level,
                         tags: n.tags || [],
+                        knowledge_gaps: n.knowledge_gaps || [],
+                        recommendations: n.recommendations || [],
                         ...n
                       })),
                       links: graphData.links
@@ -383,13 +350,142 @@ export const App: React.FC = () => {
           />
         </div>
 
-        {/* Right Panel - Sliding, only when node selected */}
+        {/* Left Panel - Overlay with Acrylic */}
+        <div className="glass-panel" style={{
+          width: `${leftPanelWidth}px`,
+          minWidth: '300px',
+          maxWidth: '800px',
+          padding: 'var(--space-2xl)',
+          borderRight: '1px solid var(--glass-border)',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          background: 'var(--glass-bg)',
+          backdropFilter: 'blur(10px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(10px) saturate(180%)',
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          zIndex: 50,
+          transition: isResizing ? 'none' : 'width var(--transition-normal)',
+          boxShadow: '4px 0 20px rgba(0, 0, 0, 0.1)'
+        }}>
+          {/* Resize handle */}
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setIsResizing(true)
+              const startX = e.clientX
+              const startWidth = leftPanelWidth
+              
+              const handleMouseMove = (e: MouseEvent) => {
+                const diff = e.clientX - startX
+                const newWidth = Math.max(300, Math.min(800, startWidth + diff))
+                setLeftPanelWidth(newWidth)
+              }
+              
+              const handleMouseUp = () => {
+                setIsResizing(false)
+                document.removeEventListener('mousemove', handleMouseMove)
+                document.removeEventListener('mouseup', handleMouseUp)
+                document.body.style.cursor = ''
+                document.body.style.userSelect = ''
+              }
+              
+              document.body.style.cursor = 'col-resize'
+              document.body.style.userSelect = 'none'
+              document.addEventListener('mousemove', handleMouseMove)
+              document.addEventListener('mouseup', handleMouseUp)
+            }}
+            style={{
+              position: 'absolute',
+              right: '-2px',
+              top: 0,
+              bottom: 0,
+              width: '4px',
+              cursor: 'col-resize',
+              backgroundColor: 'transparent',
+              zIndex: 10,
+              pointerEvents: 'auto'
+            }}
+            onMouseEnter={(e) => {
+              if (!isResizing) {
+                e.currentTarget.style.backgroundColor = 'var(--color-primary)'
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isResizing) {
+                e.currentTarget.style.backgroundColor = 'transparent'
+              }
+            }}
+          />
+          <h2 style={{ margin: '0 0 var(--space-xl) 0', fontSize: 'var(--font-size-2xl)', display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+            <DocumentCopy size={24} variant="Bold" />
+            Заметка
+          </h2>
+          <input
+            placeholder="Заголовок (опционально)"
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            className="glass-input"
+            style={{ marginBottom: 'var(--space-md)', width: '100%' }}
+          />
+          <Editor value={content} onChange={setContent} />
+          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-md)' }}>
+            <button
+              onClick={onAnalyze}
+              disabled={analyzing}
+              className="btn-primary"
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-sm)' }}
+            >
+              {analyzing ? (
+                <>
+                  <div className="spinner" />
+                  Модель думает...
+                </>
+              ) : (
+                <>
+                  <Flash size={20} variant="Bold" />
+                  Анализировать
+                </>
+              )}
+            </button>
+          </div>
+          {analysisResult && (
+            <AnalysisResults 
+              result={analysisResult} 
+              onTagClick={setHighlightedTag}
+            />
+          )}
+          <NotesHistory
+            notes={notes}
+            onSelectNote={onSelectNote}
+            onDeleteNote={onDeleteNote}
+          />
+        </div>
+
+        {/* Right Panel - Overlay, only when node selected */}
         {selectedNode && (
           <div className="glass-panel" style={{
+            width: '360px',
             padding: 0,
             borderLeft: '1px solid var(--glass-border)',
             overflowY: 'auto',
-            animation: 'slideInRight 0.3s ease-out'
+            overflowX: 'hidden',
+            animation: 'slideInRight 0.3s ease-out',
+            display: 'flex',
+            flexDirection: 'column',
+            height: '100%',
+            background: 'var(--glass-bg)',
+            backdropFilter: 'blur(10px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(10px) saturate(180%)',
+            boxShadow: '-4px 0 20px rgba(0, 0, 0, 0.1)',
+            position: 'absolute',
+            right: 0,
+            top: 0,
+            bottom: 0,
+            zIndex: 50
           }}>
             <NodeDetails 
               node={selectedNode} 
@@ -413,6 +509,8 @@ export const App: React.FC = () => {
                   has_gap: n.has_gap,
                   level: n.level,
                   tags: n.tags || [],
+                  knowledge_gaps: n.knowledge_gaps || [],
+                  recommendations: n.recommendations || [],
                   ...n
                 }))
                 setGraph({
@@ -439,6 +537,8 @@ export const App: React.FC = () => {
                     has_gap: n.has_gap,
                     level: n.level,
                     tags: n.tags || [],
+                    knowledge_gaps: n.knowledge_gaps || [],
+                    recommendations: n.recommendations || [],
                     ...n
                   })),
                   links: graphData.links
@@ -481,7 +581,9 @@ const Header: React.FC<HeaderProps> = ({ user, onNavigate, onLogout, currentPage
     alignItems: 'center',
     justifyContent: 'space-between',
     zIndex: 1000,
-    backdropFilter: 'blur(10px) saturate(180%)'
+    background: 'var(--glass-bg)',
+    backdropFilter: 'blur(10px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(10px) saturate(180%)'
   }}>
     <h1 style={{
       fontSize: 'var(--font-size-xl)',

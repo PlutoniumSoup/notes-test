@@ -57,14 +57,77 @@ async def analyze_note(
     
     try:
         with driver.session() as session:
+            # Сначала определяем главный концепт (с наибольшим количеством связей)
+            concept_connections = {}
+            for rel in relationships:
+                source = rel.get("source", "")
+                target = rel.get("target", "")
+                concept_connections[source] = concept_connections.get(source, 0) + 1
+                concept_connections[target] = concept_connections.get(target, 0) + 1
+            
+            # Главный концепт - тот, у которого больше всего связей
+            main_concept_id = max(concept_connections.items(), key=lambda x: x[1])[0] if concept_connections else (concepts[0].get("id", "") if concepts else "")
+            
+            # Строим граф связей для определения уровней
+            adjacency = {}
+            for rel in relationships:
+                source = rel.get("source", "")
+                target = rel.get("target", "")
+                if source not in adjacency:
+                    adjacency[source] = []
+                if target not in adjacency:
+                    adjacency[target] = []
+                adjacency[source].append(target)
+                adjacency[target].append(source)
+            
+            # BFS для определения уровней от главного концепта
+            node_levels = {}
+            if main_concept_id and main_concept_id in adjacency:
+                queue = [(main_concept_id, 0)]
+                visited = {main_concept_id}
+                while queue:
+                    current, level = queue.pop(0)
+                    node_levels[current] = level
+                    for neighbor in adjacency.get(current, []):
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            queue.append((neighbor, level + 1))
+            
             # Создаем/обновляем узлы для каждого концепта
             for concept in concepts:
                 concept_id = concept.get("id", "")
                 label = concept.get("label", "")
                 description = concept.get("description", "")
+                knowledge_gaps = concept.get("knowledge_gaps", [])
+                recommendations = concept.get("recommendations", [])
                 
                 # Генерируем стабильный ID на основе label и user_id
                 stable_id = hashlib.md5(f"{label}_{current_user.id}".encode()).hexdigest()[:16]
+                
+                # Определяем уровень узла
+                level = node_levels.get(concept_id, 0)
+                if concept_id == main_concept_id:
+                    level = 0  # Главный концепт всегда уровень 0
+                
+                # Проверяем, есть ли пробелы знаний
+                has_gap = len(knowledge_gaps) > 0 or len(recommendations) > 0
+                
+                # Получаем существующие пробелы и рекомендации
+                existing_node = session.run(
+                    """
+                    MATCH (n:Node {id: $id, user_id: $user_id})
+                    RETURN n.knowledge_gaps AS gaps, n.recommendations AS recs
+                    """,
+                    id=stable_id,
+                    user_id=str(current_user.id)
+                ).single()
+                
+                existing_gaps = existing_node["gaps"] if existing_node and existing_node["gaps"] else []
+                existing_recs = existing_node["recs"] if existing_node and existing_node["recs"] else []
+                
+                # Объединяем пробелы и рекомендации (убираем дубликаты)
+                merged_gaps = list(set(existing_gaps + knowledge_gaps))
+                merged_recs = list(set(existing_recs + recommendations))
                 
                 # Upsert узел в Neo4j
                 result = session.run(
@@ -75,11 +138,17 @@ async def analyze_note(
                         n.summary = $description,
                         n.tags = $tags,
                         n.created_at = datetime(),
-                        n.has_gap = false,
-                        n.level = 0
+                        n.has_gap = $has_gap,
+                        n.level = $level,
+                        n.knowledge_gaps = $gaps,
+                        n.recommendations = $recs
                     ON MATCH SET
                         n.summary = CASE WHEN n.summary IS NULL OR n.summary = '' THEN $description ELSE n.summary END,
-                        n.updated_at = datetime()
+                        n.updated_at = datetime(),
+                        n.has_gap = CASE WHEN size($gaps) > 0 OR size($recs) > 0 THEN true ELSE n.has_gap END,
+                        n.knowledge_gaps = $gaps,
+                        n.recommendations = $recs,
+                        n.level = CASE WHEN $level < n.level OR n.level IS NULL THEN $level ELSE n.level END
                     WITH n
                     OPTIONAL MATCH (note:Note {id: $note_id}) 
                     WHERE $note_id IS NOT NULL
@@ -93,7 +162,11 @@ async def analyze_note(
                     label=label,
                     description=description,
                     tags=tags,
-                    note_id=note_id
+                    note_id=note_id,
+                    has_gap=has_gap,
+                    level=level,
+                    gaps=merged_gaps,
+                    recs=merged_recs
                 )
                 
                 node_id_map[concept_id] = stable_id
@@ -101,9 +174,11 @@ async def analyze_note(
                     "id": stable_id,
                     "label": label,
                     "summary": description,
-                    "has_gap": False,
-                    "level": 0,
-                    "tags": tags
+                    "has_gap": has_gap,
+                    "level": level,
+                    "tags": tags,
+                    "knowledge_gaps": merged_gaps,
+                    "recommendations": merged_recs
                 })
             
             # Создаем связи между узлами
@@ -136,6 +211,38 @@ async def analyze_note(
                         "target": target_id,
                         "relation": rel_type
                     })
+            
+            # Эволюция узлов: если у узла первого уровня большая подветка, превращаем его в центральный
+            for node_id in node_id_map.values():
+                # Подсчитываем количество связей (исходящих и входящих)
+                result = session.run(
+                    """
+                    MATCH (n:Node {id: $node_id, user_id: $user_id})-[r:RELATED]-(connected:Node {user_id: $user_id})
+                    WITH n, count(r) AS connection_count
+                    MATCH (n)-[out:RELATED]->(outgoing:Node {user_id: $user_id})
+                    WITH n, connection_count, count(out) AS outgoing_count
+                    RETURN n.level AS level, connection_count, outgoing_count
+                    """,
+                    node_id=node_id,
+                    user_id=str(current_user.id)
+                )
+                record = result.single()
+                if record:
+                    connection_count = record["connection_count"] or 0
+                    outgoing_count = record["outgoing_count"] or 0
+                    current_level = record["level"] or 0
+                    
+                    # Если у узла первого уровня больше 5 связей или больше 3 исходящих, делаем его центральным
+                    if current_level == 1 and (connection_count >= 5 or outgoing_count >= 3):
+                        session.run(
+                            """
+                            MATCH (n:Node {id: $node_id, user_id: $user_id})
+                            SET n.level = 0
+                            """,
+                            node_id=node_id,
+                            user_id=str(current_user.id)
+                        )
+                        logger.info(f"Node {node_id} evolved to level 0 (central) due to {connection_count} connections")
             
         logger.info(f"Created {len(created_nodes)} nodes and {len(links)} links")
         

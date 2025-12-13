@@ -106,6 +106,8 @@ def graph_from_cypher_records(records) -> GraphData:
                 tags=a.get("tags", []),
                 has_gap=bool(a.get("has_gap", False)),
                 level=a.get("level"),
+                knowledge_gaps=a.get("knowledge_gaps", []),
+                recommendations=a.get("recommendations", []),
             )
         if b and b.id not in node_map:
             node_map[b.id] = GraphNode(
@@ -115,6 +117,8 @@ def graph_from_cypher_records(records) -> GraphData:
                 tags=b.get("tags", []),
                 has_gap=bool(b.get("has_gap", False)),
                 level=b.get("level"),
+                knowledge_gaps=b.get("knowledge_gaps", []),
+                recommendations=b.get("recommendations", []),
             )
         if r:
             links.append(

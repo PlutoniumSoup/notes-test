@@ -113,7 +113,9 @@ Return JSON with this EXACT structure:
     {{
       "id": "concept_1",
       "label": "Concept Name",
-      "description": "Brief 1-sentence description of this concept from the text"
+      "description": "Brief 1-sentence description of this concept from the text",
+      "knowledge_gaps": ["What is missing or unclear about this concept"],
+      "recommendations": ["What should be studied next related to this concept"]
     }}
   ],
   "relationships": [
@@ -127,6 +129,12 @@ Return JSON with this EXACT structure:
   "tags": ["tag1", "tag2"],
   "main_topic": "One sentence about what the note discusses"
 }}
+
+IMPORTANT: 
+- Identify the MAIN concept (the most central one) - it should have the most connections
+- Other concepts should be linked hierarchically (level 1, level 2, etc.)
+- knowledge_gaps: List what information is missing or unclear about each concept
+- recommendations: Suggest what topics should be studied to fill the gaps
 
 EXAMPLES of correct extraction:
 

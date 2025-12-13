@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { useTheme } from '../contexts/ThemeContext'
 
+
 interface GraphViewProps {
   data: any;
   onSelectNode: (n: any) => void;
@@ -16,6 +17,7 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [hoveredNode, setHoveredNode] = useState<any>(null)
   const [graphData, setGraphData] = useState(data)
+  const [isInitialized, setIsInitialized] = useState(false)
   const { theme } = useTheme()
   
   // Вычисляем расстояния от сфокусированного узла до всех остальных
@@ -90,14 +92,41 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
     return 0 // Остальные скрыты
   }, [focusedNode, getNodeDistance])
 
+  // Сохраняем позиции узлов в localStorage при их изменении
+  useEffect(() => {
+    if (graphData && graphData.nodes && graphData.nodes.length > 0) {
+      const nodePositions: Record<string, { fx: number; fy: number }> = {}
+      graphData.nodes.forEach((node: any) => {
+        if (node.fx !== undefined && node.fx !== null && node.fy !== undefined && node.fy !== null) {
+          nodePositions[node.id] = { fx: node.fx, fy: node.fy }
+        }
+      })
+      if (Object.keys(nodePositions).length > 0) {
+        localStorage.setItem('graphNodePositions', JSON.stringify(nodePositions))
+      }
+    }
+  }, [graphData])
+
   // Обновляем данные графа при изменении пропсов, сохраняя позиции узлов
   useEffect(() => {
     if (data && data.nodes && data.nodes.length > 0) {
-      // Сохраняем позиции существующих узлов
-      const nodePositions = new Map()
+      // Загружаем сохраненные позиции из localStorage
+      let savedPositions: Record<string, { fx: number; fy: number }> = {}
+      try {
+        const saved = localStorage.getItem('graphNodePositions')
+        if (saved) {
+          savedPositions = JSON.parse(saved)
+        }
+      } catch (e) {
+        console.warn('Failed to load saved node positions', e)
+      }
+
+      // Сохраняем позиции существующих узлов из текущего graphData
+      const nodePositions = new Map<string, { fx: number; fy: number }>()
       if (graphData && graphData.nodes) {
         graphData.nodes.forEach((node: any) => {
-          if (node.fx !== undefined && node.fy !== undefined) {
+          // Сохраняем только если узел был зафиксирован (fx/fy установлены и не null)
+          if (node.fx !== undefined && node.fx !== null && node.fy !== undefined && node.fy !== null) {
             nodePositions.set(node.id, { fx: node.fx, fy: node.fy })
           }
         })
@@ -105,31 +134,96 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
 
       // Применяем сохраненные позиции к новым данным
       const updatedNodes = data.nodes.map((node: any) => {
-        const pos = nodePositions.get(node.id)
-        if (pos) {
-          return { ...node, fx: pos.fx, fy: pos.fy }
+        // Сначала проверяем текущие позиции из graphData
+        const currentPos = nodePositions.get(node.id)
+        if (currentPos) {
+          return { ...node, fx: currentPos.fx, fy: currentPos.fy }
         }
-        return node
+        // Затем проверяем сохраненные позиции из localStorage
+        const savedPos = savedPositions[node.id]
+        if (savedPos) {
+          return { ...node, fx: savedPos.fx, fy: savedPos.fy }
+        }
+        // Для новых узлов или узлов без фиксированной позиции - убираем fx/fy
+        const newNode = { ...node }
+        delete newNode.fx
+        delete newNode.fy
+        return newNode
       })
 
       setGraphData({ ...data, nodes: updatedNodes })
+      setIsInitialized(true)
     } else if (!data || !data.nodes || data.nodes.length === 0) {
       setGraphData({ nodes: [], links: [] })
+      setIsInitialized(true)
     }
   }, [data])
 
   useEffect(() => {
     const updateDimensions = () => {
-      setDimensions({ width: window.innerWidth - 780, height: window.innerHeight })
+      // Размеры будут обновляться через ref контейнера
+      const container = fgRef.current?.parentElement
+      if (container && container.clientWidth > 0 && container.clientHeight > 0) {
+        const newWidth = container.clientWidth
+        const newHeight = container.clientHeight
+        setDimensions({ 
+          width: newWidth, 
+          height: newHeight 
+        })
+        // Принудительно обновляем размеры графа
+        if (fgRef.current) {
+          fgRef.current.width(newWidth)
+          fgRef.current.height(newHeight)
+          // Перезапускаем симуляцию для применения новых размеров
+          if (isInitialized) {
+            fgRef.current.d3Force('center')?.strength(0.1)
+            fgRef.current.d3Force('charge')?.strength(-300)
+            fgRef.current.d3ReheatSimulation()
+          }
+        }
+      } else {
+        // Fallback если контейнер еще не готов
+        setDimensions({ 
+          width: window.innerWidth, 
+          height: window.innerHeight - 64 
+        })
+      }
     }
+    
+    // Небольшая задержка для корректного расчета размеров после монтирования
+    const timeoutId1 = setTimeout(updateDimensions, 50)
+    const timeoutId2 = setTimeout(updateDimensions, 200)
+    const timeoutId3 = setTimeout(updateDimensions, 500)
+    
     updateDimensions()
     window.addEventListener('resize', updateDimensions)
-    return () => window.removeEventListener('resize', updateDimensions)
-  }, [])
+    
+    // Используем ResizeObserver для отслеживания изменений размера контейнера
+    const container = fgRef.current?.parentElement
+    let resizeObserver: ResizeObserver | null = null
+    if (container && window.ResizeObserver) {
+      resizeObserver = new ResizeObserver(() => {
+        // Небольшая задержка для стабилизации размеров
+        setTimeout(updateDimensions, 10)
+      })
+      resizeObserver.observe(container)
+    }
+    
+    return () => {
+      clearTimeout(timeoutId1)
+      clearTimeout(timeoutId2)
+      clearTimeout(timeoutId3)
+      window.removeEventListener('resize', updateDimensions)
+      if (resizeObserver) {
+        resizeObserver.disconnect()
+      }
+    }
+  }, [focusedNode, isInitialized])
 
   // Сохраняем позиции узлов при перетаскивании
   const handleNodeDrag = useCallback((node: any) => {
-    // Фиксируем позицию узла при перетаскивании
+    // Фиксируем позицию только перетаскиваемого узла во время drag
+    // Это предотвращает отталкивание другими узлами
     if (node) {
       node.fx = node.x
       node.fy = node.y
@@ -137,7 +231,8 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
   }, [])
 
   const handleNodeDragEnd = useCallback((node: any) => {
-    // Сохраняем финальную позицию
+    // Сохраняем финальную позицию только перетаскиваемого узла
+    // После окончания drag узел остается зафиксированным
     if (node) {
       node.fx = node.x
       node.fy = node.y
@@ -145,8 +240,9 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
   }, [])
 
   // Theme-aware colors
-  const isDark = theme === 'dark'
-  const bgColor = isDark ? '#0f172a' : '#f9fafb'
+  const isDark = theme === 'dark' || theme === 'dark-black'
+  const isBlack = theme === 'dark-black'
+  const bgColor = isBlack ? '#000000' : (isDark ? '#0f172a' : '#f9fafb')
 
   // Node colors based on theme
   const getNodeColor = (n: any) => {
@@ -160,7 +256,11 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
       return isDark ? '#a78bfa' : '#8b5cf6' // Accent color для подсветки
     }
     
-    if (n.has_gap) return isDark ? '#f87171' : '#ef4444'
+    // Желтый цвет для узлов с пробелами знаний
+    if (n.has_gap || (n.knowledge_gaps && n.knowledge_gaps.length > 0) || (n.recommendations && n.recommendations.length > 0)) {
+      return isDark ? '#fbbf24' : '#f59e0b' // Желтый для пробелов знаний
+    }
+    
     if (n.id?.startsWith('topic_')) return isDark ? '#34d399' : '#10b981'
     if (n.id?.startsWith('note_')) return isDark ? '#34d399' : '#10b981'
     if (n.id?.startsWith('wiki_')) return isDark ? '#fbbf24' : '#f59e0b'
@@ -199,9 +299,23 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
     }
     return isDark ? '#475569' : '#94a3b8'
   }
+  // Инициализация сил графа
+  useEffect(() => {
+    if (fgRef.current && isInitialized) {
+      // Настраиваем силы для правильной работы графа
+      fgRef.current.d3Force('charge')?.strength(-300)
+      fgRef.current.d3Force('link')?.distance(100)
+      fgRef.current.d3Force('center')?.strength(0.1)
+      // Перезапускаем симуляцию для применения настроек
+      fgRef.current.d3ReheatSimulation()
+    }
+  }, [isInitialized])
 
   // Отрисовка узлов и имен с прозрачностью
   const nodeCanvasObject = useCallback((node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+
+    
+    
     // Сначала рисуем сам узел (круг)
     const nodeSize = getNodeSize(node)
     const nodeColor = getNodeColor(node)
@@ -213,7 +327,10 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
     ctx.fill()
     
     // Добавляем обводку для лучшей видимости
-    ctx.strokeStyle = theme === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(0, 0, 0, 0.1)'
+    const isBlackTheme = theme === 'dark-black'
+    ctx.strokeStyle = isDark 
+      ? (isBlackTheme ? 'rgba(255, 255, 255, 0.3)' : 'rgba(255, 255, 255, 0.2)')
+      : 'rgba(0, 0, 0, 0.1)'
     ctx.lineWidth = 1 / globalScale
     ctx.stroke()
     
@@ -230,13 +347,17 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     
-    const isDarkTheme = theme === 'dark'
-    const textColor = isDarkTheme ? 'rgba(241, 245, 249, ' + opacity + ')' : 'rgba(17, 24, 39, ' + opacity + ')'
+    const isDarkTheme = theme === 'dark' || theme === 'dark-black'
+    const textColor = isDarkTheme 
+      ? (isBlackTheme ? 'rgba(255, 255, 255, ' + opacity + ')' : 'rgba(241, 245, 249, ' + opacity + ')')
+      : 'rgba(17, 24, 39, ' + opacity + ')'
     
     // Рисуем фон для текста для лучшей читаемости
     const textWidth = ctx.measureText(label).width
     const padding = 4 / globalScale
-    ctx.fillStyle = isDarkTheme ? 'rgba(15, 23, 42, ' + (opacity * 0.7) + ')' : 'rgba(249, 250, 251, ' + (opacity * 0.9) + ')'
+    ctx.fillStyle = isDarkTheme 
+      ? (isBlackTheme ? 'rgba(0, 0, 0, ' + (opacity * 0.8) + ')' : 'rgba(15, 23, 42, ' + (opacity * 0.7) + ')')
+      : 'rgba(249, 250, 251, ' + (opacity * 0.9) + ')'
     ctx.fillRect(
       node.x - textWidth / 2 - padding,
       node.y + nodeSize + padding,
@@ -295,8 +416,21 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
         linkDirectionalArrowRelPos={1}
         linkColor={getLinkColor}
         cooldownTicks={100}
+        d3AlphaDecay={0.0228}
+        d3AlphaMin={0.001}
         onEngineStop={() => {
-          // Не фиксируем позиции автоматически, чтобы узлы могли двигаться
+          // Когда симуляция останавливается, сохраняем финальные позиции
+          if (fgRef.current && graphData?.nodes) {
+            graphData.nodes.forEach((node: any) => {
+              if (node.x !== undefined && node.y !== undefined) {
+                // Сохраняем позицию только если узел был зафиксирован
+                if (node.fx !== undefined && node.fy !== undefined) {
+                  node.fx = node.x
+                  node.fy = node.y
+                }
+              }
+            })
+          }
         }}
       />
     </div>

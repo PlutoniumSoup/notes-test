@@ -9,7 +9,7 @@ interface SettingsPageProps {
 
 export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
   const { user, updateProfile } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, colorScheme, setColorScheme } = useTheme();
   const [llmModel, setLlmModel] = useState(user?.llm_model || 'google');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -19,7 +19,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
     setMessage('');
 
     try {
-      await updateProfile(theme, llmModel);
+      await updateProfile(theme as 'light' | 'dark' | undefined, llmModel);
       setMessage('Settings saved successfully!');
       setTimeout(() => setMessage(''), 3000);
     } catch (error: any) {
@@ -29,7 +29,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
     }
   };
 
-  const handleThemeChange = (newTheme: 'light' | 'dark') => {
+  const handleThemeChange = (newTheme: 'light' | 'dark' | 'dark-black') => {
     setTheme(newTheme);
   };
 
@@ -37,6 +37,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
     <div style={{
       minHeight: '100vh',
       padding: 'var(--space-3xl)',
+      paddingTop: 'calc(var(--space-3xl) + 64px)',
       maxWidth: '800px',
       margin: '0 auto'
     }} className="fade-in">
@@ -92,8 +93,89 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
               style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-sm)' }}
             >
               <Moon size={20} variant={theme === 'dark' ? 'Bold' : 'Outline'} />
-              Темная
+              Темная (синяя)
             </button>
+            <button
+              onClick={() => handleThemeChange('dark-black')}
+              className={theme === 'dark-black' ? 'btn-primary' : 'btn-ghost'}
+              style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 'var(--space-sm)' }}
+            >
+              <Moon size={20} variant={theme === 'dark-black' ? 'Bold' : 'Outline'} />
+              Темная (черная)
+            </button>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 'var(--space-lg)' }}>
+          <label>Цветовая гамма</label>
+          <p style={{
+            marginTop: 'var(--space-xs)',
+            fontSize: 'var(--font-size-xs)',
+            color: 'var(--color-text-tertiary)',
+            marginBottom: 'var(--space-sm)'
+          }}>
+            Выберите цветовую схему интерфейса
+          </p>
+          <div style={{ 
+            display: 'grid', 
+            gridTemplateColumns: 'repeat(3, 1fr)', 
+            gap: 'var(--space-sm)',
+            marginTop: 'var(--space-sm)'
+          }}>
+            {(['blue', 'green', 'purple', 'red', 'orange', 'pink'] as const).map((color) => (
+              <button
+                key={color}
+                onClick={() => setColorScheme(color)}
+                className={colorScheme === color ? 'btn-primary' : 'btn-ghost'}
+                style={{
+                  padding: 'var(--space-md)',
+                  borderRadius: 'var(--radius-md)',
+                  border: colorScheme === color ? '2px solid var(--color-primary)' : '2px solid var(--color-border)',
+                  background: colorScheme === color ? 'var(--color-primary)' : 'var(--color-surface)',
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)',
+                  opacity: colorScheme === color ? 1 : 0.8
+                }}
+                onMouseEnter={(e) => {
+                  if (colorScheme !== color) {
+                    e.currentTarget.style.borderColor = 'var(--color-primary)'
+                    e.currentTarget.style.transform = 'scale(1.05)'
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (colorScheme !== color) {
+                    e.currentTarget.style.borderColor = 'var(--color-border)'
+                    e.currentTarget.style.transform = 'scale(1)'
+                  }
+                }}
+                title={`Цветовая схема: ${color}`}
+              >
+                <div style={{
+                  width: '100%',
+                  height: '40px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: color === 'blue' ? 'linear-gradient(135deg, #3b82f6, #6366f1)' :
+                              color === 'green' ? 'linear-gradient(135deg, #10b981, #059669)' :
+                              color === 'purple' ? 'linear-gradient(135deg, #8b5cf6, #7c3aed)' :
+                              color === 'red' ? 'linear-gradient(135deg, #ef4444, #dc2626)' :
+                              color === 'orange' ? 'linear-gradient(135deg, #f59e0b, #d97706)' :
+                              'linear-gradient(135deg, #ec4899, #db2777)',
+                  marginBottom: 'var(--space-xs)',
+                  boxShadow: colorScheme === color ? 'var(--shadow-md)' : 'none'
+                }} />
+                <span style={{ 
+                  fontSize: 'var(--font-size-xs)', 
+                  textTransform: 'capitalize',
+                  color: colorScheme === color ? 'var(--color-text-inverse)' : 'var(--color-text-primary)'
+                }}>
+                  {color === 'blue' ? 'Синяя' : 
+                   color === 'green' ? 'Зеленая' :
+                   color === 'purple' ? 'Фиолетовая' :
+                   color === 'red' ? 'Красная' :
+                   color === 'orange' ? 'Оранжевая' : 'Розовая'}
+                </span>
+              </button>
+            ))}
           </div>
         </div>
       </div>

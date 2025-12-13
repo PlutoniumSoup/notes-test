@@ -250,18 +250,63 @@ export const NodeDetails: React.FC<NodeDetailsProps> = ({
         </div>
       )}
 
-      {/* Knowledge Gap */}
-      {node.has_gap && (
+      {/* Knowledge Gaps */}
+      {node.knowledge_gaps && node.knowledge_gaps.length > 0 && (
         <div style={{ 
           padding: 'var(--space-md)', 
-          background: 'var(--color-warning)', 
+          background: 'rgba(251, 191, 36, 0.2)', 
           borderRadius: 'var(--radius-md)', 
           marginBottom: 'var(--space-lg)',
-          opacity: 0.2
+          border: '1px solid rgba(251, 191, 36, 0.4)'
         }}>
-          <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--color-warning)', fontWeight: 600 }}>
-            ⚠️ Здесь есть что изучить
+          <div style={{ 
+            fontSize: 'var(--font-size-xs)', 
+            color: 'var(--color-warning)', 
+            fontWeight: 600,
+            marginBottom: 'var(--space-sm)'
+          }}>
+            ⚠️ Пробелы знаний:
           </div>
+          <ul style={{ 
+            margin: 0, 
+            paddingLeft: 'var(--space-lg)',
+            fontSize: 'var(--font-size-xs)',
+            color: 'var(--color-text-primary)'
+          }}>
+            {node.knowledge_gaps.map((gap: string, idx: number) => (
+              <li key={idx} style={{ marginBottom: 'var(--space-xs)' }}>{gap}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Recommendations */}
+      {node.recommendations && node.recommendations.length > 0 && (
+        <div style={{ 
+          padding: 'var(--space-md)', 
+          background: 'rgba(251, 191, 36, 0.15)', 
+          borderRadius: 'var(--radius-md)', 
+          marginBottom: 'var(--space-lg)',
+          border: '1px solid rgba(251, 191, 36, 0.3)'
+        }}>
+          <div style={{ 
+            fontSize: 'var(--font-size-xs)', 
+            color: 'var(--color-warning)', 
+            fontWeight: 600,
+            marginBottom: 'var(--space-sm)'
+          }}>
+            💡 Рекомендации к изучению:
+          </div>
+          <ul style={{ 
+            margin: 0, 
+            paddingLeft: 'var(--space-lg)',
+            fontSize: 'var(--font-size-xs)',
+            color: 'var(--color-text-primary)'
+          }}>
+            {node.recommendations.map((rec: string, idx: number) => (
+              <li key={idx} style={{ marginBottom: 'var(--space-xs)' }}>{rec}</li>
+            ))}
+          </ul>
         </div>
       )}
 

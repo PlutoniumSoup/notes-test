@@ -3,7 +3,9 @@ import { useTheme } from '../contexts/ThemeContext';
 
 export const ThemeSwitcher: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
-  const isDark = theme === 'dark';
+  // Header only toggles between light and dark
+  // dark-black is considered as dark for header purposes
+  const isDark = theme === 'dark' || theme === 'dark-black';
 
   return (
     <button
