@@ -39,6 +39,8 @@ rectangle "5. Работа с пробелами знаний" {
 rectangle "6. Пользовательский опыт" {
   usecase "UC-11: Быстрый поиск\nпо всему" as UC11
   usecase "UC-12: Создание коллекций\n(тематических папок)" as UC12
+  usecase "UC-17: Фильтрация узлов\nпо темам, тегам, важности" as UC17
+  usecase "UC-18: Управление тегами\nи категориями" as UC18
 }
 
 rectangle "7. Дополнительные функции (MVP+)" {
@@ -57,6 +59,8 @@ User --> UC09
 User --> UC11
 User --> UC12
 User --> UC15
+User --> UC17
+User --> UC18
 
 
 UC01 ..> UC03 : <<include>>
@@ -66,6 +70,10 @@ UC09 ..> UC10 : <<include>>
 UC10 ..> UC16 : <<include>>
 
 UC12 ..> UC05 : <<include>>
+UC17 ..> UC05 : <<include>>
+
+UC18 ..> UC12 : <<include>>
+UC18 ..> UC07 : <<include>>
 
 UC05 <.. UC06 : <<extend>>
 UC07 <.. UC08 : <<extend>>
