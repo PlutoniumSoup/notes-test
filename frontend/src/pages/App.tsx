@@ -63,7 +63,7 @@ export const App: React.FC = () => {
       }
     }
     loadData()
-  }, [user])
+  }, [user, currentPage]) // Перезагружаем при возврате из настроек
 
   // Listen for Ctrl+Enter from Editor
   useEffect(() => {
@@ -107,6 +107,35 @@ export const App: React.FC = () => {
         />
         <SettingsPage onBack={() => {
           setCurrentPage('main')
+          // Принудительно обновляем граф при возврате из настроек
+          setTimeout(() => {
+            // Перезагружаем граф из БД
+            const reloadGraph = async () => {
+              try {
+                const graphData = await getAllGraph()
+                setGraph({
+                  nodes: graphData.nodes.map(n => ({
+                    id: n.id,
+                    name: n.label,
+                    label: n.label,
+                    summary: n.summary,
+                    has_gap: n.has_gap,
+                    level: n.level,
+                    tags: n.tags || [],
+                    knowledge_gaps: n.knowledge_gaps || [],
+                    recommendations: n.recommendations || [],
+                    ...n
+                  })),
+                  links: graphData.links
+                })
+                // Принудительно обновляем canvas
+                window.dispatchEvent(new Event('resize'))
+              } catch (error) {
+                console.error('Ошибка перезагрузки графа:', error)
+              }
+            }
+            reloadGraph()
+          }, 100)
         }} />
       </div>
     )
@@ -184,6 +213,35 @@ export const App: React.FC = () => {
       setGraph({ nodes: mergedNodes, links: mergedLinks })
       console.log('✅ Граф обновлен:', mergedNodes.length, 'узлов,', mergedLinks.length, 'связей')
 
+      // Перезагружаем граф из БД для получения актуальных данных
+      try {
+        const graphData = await getAllGraph()
+        const updatedNodes = graphData.nodes.map(n => ({
+          id: n.id,
+          name: n.label,
+          label: n.label,
+          summary: n.summary,
+          has_gap: n.has_gap,
+          level: n.level,
+          tags: n.tags || [],
+          knowledge_gaps: n.knowledge_gaps || [],
+          recommendations: n.recommendations || [],
+          ...n
+        }))
+        setGraph({
+          nodes: updatedNodes,
+          links: graphData.links
+        })
+        console.log('✅ Граф перезагружен из БД:', updatedNodes.length, 'узлов,', graphData.links.length, 'связей')
+        
+        // Принудительно обновляем canvas графа
+        setTimeout(() => {
+          window.dispatchEvent(new Event('resize'))
+        }, 100)
+      } catch (error) {
+        console.error('Ошибка перезагрузки графа:', error)
+      }
+
       // Auto-save after analysis
       const tags = result?.tags || []
       const noteTitle = title.trim() || `Заметка ${new Date().toLocaleString('ru-RU')}`
@@ -201,7 +259,13 @@ export const App: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Analysis error:', error)
-      alert(`Ошибка при анализе: ${error.response?.data?.detail || error.message}`)
+      const errorMessage = error.response?.data?.detail || error.message
+      // Специальная обработка для лимита узлов
+      if (error.response?.status === 429) {
+        alert(errorMessage)
+      } else {
+        alert(`Ошибка при анализе: ${errorMessage}`)
+      }
     } finally {
       setAnalyzing(false)
     }
@@ -324,6 +388,7 @@ export const App: React.FC = () => {
             </div>
           )}
           <GraphView 
+            key={currentPage === 'main' ? 'main-graph' : 'hidden-graph'}
             data={graph} 
             onSelectNode={(node) => {
               if (multiSelectMode) {

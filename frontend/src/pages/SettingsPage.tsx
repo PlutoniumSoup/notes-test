@@ -193,8 +193,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ onBack }) => {
             onChange={e => setLlmModel(e.target.value)}
             className="glass-input"
           >
-            <option value="google">Google Gemini</option>
             <option value="timeweb">Timeweb Grok</option>
+            <option value="google">Google Gemini</option>
             <option value="custom">Custom</option>
           </select>
           <p style={{

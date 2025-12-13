@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react'
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import ForceGraph2D from 'react-force-graph-2d'
 import { useTheme } from '../contexts/ThemeContext'
 
@@ -14,11 +14,19 @@ interface GraphViewProps {
 
 export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highlightedTag, onBackgroundClick, focusedNode, selectedNodes = new Set() }) => {
   const fgRef = useRef<any>()
+  const containerRef = useRef<HTMLDivElement>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [hoveredNode, setHoveredNode] = useState<any>(null)
   const [graphData, setGraphData] = useState(data)
   const [isInitialized, setIsInitialized] = useState(false)
+  const [renderKey, setRenderKey] = useState(0)
   const { theme } = useTheme()
+  
+  // Принудительный ререндер при возврате из настроек
+  useEffect(() => {
+    // Увеличиваем renderKey при монтировании компонента
+    setRenderKey(prev => prev + 1)
+  }, [])
   
   // Вычисляем расстояния от сфокусированного узла до всех остальных
   const getNodeDistance = useCallback((nodeId: string) => {
@@ -153,6 +161,15 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
 
       setGraphData({ ...data, nodes: updatedNodes })
       setIsInitialized(true)
+      
+      // Принудительно обновляем canvas после обновления данных
+      if (fgRef.current) {
+        setTimeout(() => {
+          if (fgRef.current) {
+            fgRef.current.d3ReheatSimulation()
+          }
+        }, 100)
+      }
     } else if (!data || !data.nodes || data.nodes.length === 0) {
       setGraphData({ nodes: [], links: [] })
       setIsInitialized(true)
@@ -370,6 +387,23 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
     ctx.fillText(label, node.x, node.y + nodeSize + fontSize / 2 + padding)
   }, [shouldShowLabel, getLabelOpacity, theme, getNodeSize, getNodeColor])
 
+  // Принудительный ререндер при изменении ключа
+  useEffect(() => {
+    if (renderKey > 0 && fgRef.current) {
+      // Перезапускаем симуляцию
+      setTimeout(() => {
+        if (fgRef.current) {
+          fgRef.current.d3ReheatSimulation()
+        }
+      }, 50)
+    }
+  }, [renderKey])
+
+  // Создаем уникальный ключ для принудительного ререндера
+  const graphKey = useMemo(() => {
+    return `${renderKey}-${graphData?.nodes?.length || 0}-${graphData?.links?.length || 0}`
+  }, [renderKey, graphData?.nodes?.length, graphData?.links?.length])
+
   if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', background: 'var(--color-background)' }}>
@@ -379,8 +413,9 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
   }
 
   return (
-    <div style={{ width: '100%', height: '100%', background: 'var(--color-background)' }}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', background: 'var(--color-background)' }}>
       <ForceGraph2D
+        key={graphKey}
         ref={fgRef}
         graphData={graphData}
         width={dimensions.width}
@@ -430,6 +465,16 @@ export const GraphView: React.FC<GraphViewProps> = ({ data, onSelectNode, highli
                 }
               }
             })
+            // Сохраняем позиции в localStorage
+            const nodePositions: Record<string, { fx: number; fy: number }> = {}
+            graphData.nodes.forEach((node: any) => {
+              if (node.fx !== undefined && node.fx !== null && node.fy !== undefined && node.fy !== null) {
+                nodePositions[node.id] = { fx: node.fx, fy: node.fy }
+              }
+            })
+            if (Object.keys(nodePositions).length > 0) {
+              localStorage.setItem('graphNodePositions', JSON.stringify(nodePositions))
+            }
           }
         }}
       />
